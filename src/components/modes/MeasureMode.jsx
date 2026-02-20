@@ -6,6 +6,11 @@ import { useMetronome } from '../../hooks/useMetronome.js';
 
 function freshSession() { return { at: 0, co: 0 }; }
 
+function buildFinalStats(session) {
+  const { at, co } = session;
+  return { total_attempts: at, total_correct: co };
+}
+
 export default function MeasureMode({ isPlaying, onStart, onStop, registerModeHandler }) {
   const { clef, tier, accidentals, bpm, timeSig } = useStore();
 
@@ -15,6 +20,7 @@ export default function MeasureMode({ isPlaying, onStart, onStop, registerModeHa
   const [measureResult, setMeasureResult]   = useState(null);
   const [session, setSession]               = useState(freshSession);
   const [history, setHistory]               = useState([]);
+  const sessionRef                          = useRef(freshSession());
 
   const beats = parseInt(timeSig.split('/')[0]) || 4;
   const metro = useMetronome({ bpm, beatsPerMeasure: beats });
@@ -43,7 +49,9 @@ export default function MeasureMode({ isPlaying, onStart, onStop, registerModeHa
 
   useEffect(() => {
     if (isPlaying) {
-      setSession(freshSession());
+      const fresh = freshSession();
+      sessionRef.current = fresh;
+      setSession(fresh);
       setHistory([]);
       nextMeasure();
     } else {
@@ -70,7 +78,7 @@ export default function MeasureMode({ isPlaying, onStart, onStop, registerModeHa
 
       if (s.measureIndex + 1 >= s.currentMeasure.length) {
         setMeasureResult('pass');
-        setSession(p => ({ at: p.at + 1, co: p.co + 1 }));
+        setSession(p => { const n = { at: p.at + 1, co: p.co + 1 }; sessionRef.current = n; return n; });
         setHistory(h => [...h.slice(-49), true]);
         metro.stop();
         if (resultTimeout.current) clearTimeout(resultTimeout.current);
@@ -85,7 +93,7 @@ export default function MeasureMode({ isPlaying, onStart, onStop, registerModeHa
         return next;
       });
       setMeasureResult('fail');
-      setSession(p => ({ ...p, at: p.at + 1 }));
+      setSession(p => { const n = { ...p, at: p.at + 1 }; sessionRef.current = n; return n; });
       setHistory(h => [...h.slice(-49), false]);
       metro.stop();
       if (resultTimeout.current) clearTimeout(resultTimeout.current);
@@ -140,7 +148,7 @@ export default function MeasureMode({ isPlaying, onStart, onStop, registerModeHa
                 {measureResult === 'pass' ? 'Perfect! ✓' : 'Try again'}
               </div>
             )}
-            <button className="stop-btn" onClick={onStop}>Stop</button>
+            <button className="stop-btn" onClick={() => onStop(buildFinalStats(sessionRef.current))}>Stop</button>
           </div>
         )}
       </div>

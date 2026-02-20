@@ -11,6 +11,13 @@ import {
 
 function freshSession() { return { at: 0, co: 0, rt: [] }; }
 
+function buildFinalStats(session) {
+  const { at, co, rt } = session;
+  const best = rt.length > 0 ? Math.min(...rt) : null;
+  const avg  = rt.length > 0 ? Math.round(rt.reduce((a, b) => a + b, 0) / rt.length) : null;
+  return { total_attempts: at, total_correct: co, best_reaction: best, avg_reaction: avg, reaction_times: rt };
+}
+
 export default function FlashMode({ isPlaying, onStart, onStop, registerModeHandler }) {
   const { clef, tier, accidentals, recordAttempt } = useStore();
   const pressedKeys = useStore(s => s.pressedKeys);
@@ -20,10 +27,11 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
   const [feedback, setFeedback]       = useState(null);
   const [session, setSession]         = useState(freshSession);
   const [history, setHistory]         = useState([]);
+  const sessionRef                    = useRef(freshSession());
 
   // Keep volatile state in a ref so the handler never goes stale
   const S = useRef({});
-  S.current = { clef, tier, accidentals, currentNote, activeClef, isPlaying };
+  S.current = { clef, tier, accidentals, currentNote, activeClef, isPlaying, session };
 
   // Mirror pressedKeys in a ref (avoids stale closure without causing handler recreation)
   const pressedKeysRef = useRef(pressedKeys);
@@ -58,7 +66,9 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
   // Start / stop
   useEffect(() => {
     if (isPlaying) {
-      setSession(freshSession());
+      const fresh = freshSession();
+      sessionRef.current = fresh;
+      setSession(fresh);
       setHistory([]);
       nextNote();
     } else {
@@ -84,14 +94,14 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
 
       if (allHeld) {
         setFeedback('correct');
-        setSession(p => ({ at: p.at + 1, co: p.co + 1, rt: rt ? [...p.rt, rt] : p.rt }));
+        setSession(p => { const n = { at: p.at + 1, co: p.co + 1, rt: rt ? [...p.rt, rt] : p.rt }; sessionRef.current = n; return n; });
         setHistory(h => [...h.slice(-49), true]);
         recordAttempt(true, rt);
         clearFeedbackTimer();
         feedbackTimeout.current = setTimeout(nextNote, 500);
       } else if (wrongNote) {
         setFeedback('incorrect');
-        setSession(p => ({ ...p, at: p.at + 1 }));
+        setSession(p => { const n = { ...p, at: p.at + 1 }; sessionRef.current = n; return n; });
         setHistory(h => [...h.slice(-49), false]);
         recordAttempt(false, null);
         clearFeedbackTimer();
@@ -100,7 +110,7 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
     } else {
       const ok = midi === s.currentNote[0];
       setFeedback(ok ? 'correct' : 'incorrect');
-      setSession(p => ({ at: p.at + 1, co: p.co + (ok ? 1 : 0), rt: ok && rt ? [...p.rt, rt] : p.rt }));
+      setSession(p => { const n = { at: p.at + 1, co: p.co + (ok ? 1 : 0), rt: ok && rt ? [...p.rt, rt] : p.rt }; sessionRef.current = n; return n; });
       setHistory(h => [...h.slice(-49), ok]);
       recordAttempt(ok, ok ? rt : null);
       clearFeedbackTimer();
@@ -160,7 +170,7 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
               activeClef={activeClef}
             />
             <div className={`note-name-display${feedback ? ` ${feedback}` : ''}`}>{noteLabel()}</div>
-            <button className="stop-btn" onClick={onStop}>Stop</button>
+            <button className="stop-btn" onClick={() => onStop(buildFinalStats(sessionRef.current))}>Stop</button>
           </div>
         )}
       </div>

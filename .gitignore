@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Build output
+dist/
+
+# Environment secrets — never commit these
+.env
+server/.env
+server/.env.runtime
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Claude Code session data
+.claude/
+
+# Terraform secrets (only the example file should be committed)
+infra/terraform.tfvars
+
+# Test coverage
+coverage/

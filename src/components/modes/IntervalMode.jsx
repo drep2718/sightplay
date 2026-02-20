@@ -6,6 +6,11 @@ import { generateInterval, getEffectiveRange } from '../../utils/generators.js';
 
 function freshSession() { return { at: 0, co: 0 }; }
 
+function buildFinalStats(session) {
+  const { at, co } = session;
+  return { total_attempts: at, total_correct: co };
+}
+
 export default function IntervalMode({ isPlaying, onStart, onStop, registerModeHandler }) {
   const { clef, tier, intervalMax } = useStore();
   const pressedKeys = useStore(s => s.pressedKeys);
@@ -15,6 +20,7 @@ export default function IntervalMode({ isPlaying, onStart, onStop, registerModeH
   const [feedback, setFeedback]                = useState(null);
   const [session, setSession]                  = useState(freshSession);
   const [history, setHistory]                  = useState([]);
+  const sessionRef                             = useRef(freshSession());
 
   const S = useRef({});
   S.current = { clef, tier, intervalMax, currentInterval, activeClef, isPlaying };
@@ -38,7 +44,9 @@ export default function IntervalMode({ isPlaying, onStart, onStop, registerModeH
 
   useEffect(() => {
     if (isPlaying) {
-      setSession(freshSession());
+      const fresh = freshSession();
+      sessionRef.current = fresh;
+      setSession(fresh);
       setHistory([]);
       nextInterval();
     } else {
@@ -58,13 +66,13 @@ export default function IntervalMode({ isPlaying, onStart, onStop, registerModeH
 
     if (keys.includes(lo) && keys.includes(hi)) {
       setFeedback('correct');
-      setSession(p => ({ at: p.at + 1, co: p.co + 1 }));
+      setSession(p => { const n = { at: p.at + 1, co: p.co + 1 }; sessionRef.current = n; return n; });
       setHistory(h => [...h.slice(-49), true]);
       if (feedbackTimeout.current) clearTimeout(feedbackTimeout.current);
       feedbackTimeout.current = setTimeout(nextInterval, 500);
     } else if (keys.length >= 2) {
       setFeedback('incorrect');
-      setSession(p => ({ ...p, at: p.at + 1 }));
+      setSession(p => { const n = { ...p, at: p.at + 1 }; sessionRef.current = n; return n; });
       setHistory(h => [...h.slice(-49), false]);
       if (feedbackTimeout.current) clearTimeout(feedbackTimeout.current);
       feedbackTimeout.current = setTimeout(() => setFeedback(null), 500);
@@ -116,7 +124,7 @@ export default function IntervalMode({ isPlaying, onStart, onStop, registerModeH
                 ? `${midiToDisplayName(currentInterval[0])} + ${midiToDisplayName(currentInterval[1])}`
                 : 'Play both notes'}
             </div>
-            <button className="stop-btn" onClick={onStop}>Stop</button>
+            <button className="stop-btn" onClick={() => onStop(buildFinalStats(sessionRef.current))}>Stop</button>
           </div>
         )}
       </div>

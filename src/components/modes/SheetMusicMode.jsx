@@ -20,6 +20,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
   const [dragover, setDragover]           = useState(false);
   const [parseError, setParseError]       = useState(null);
   const [loading, setLoading]             = useState(false);
+  const sessionRef                        = useRef({ at: 0, co: 0 });
 
   const fileInputRef    = useRef(null);
   const feedbackTimeout = useRef(null);
@@ -78,7 +79,9 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     setCurrentColIdx(0);
     setFeedback(null);
     setHistory([]);
-    setSession({ at: 0, co: 0 });
+    const fresh = { at: 0, co: 0 };
+    sessionRef.current = fresh;
+    setSession(fresh);
     isAdvancing.current = false;
 
     try {
@@ -133,7 +136,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     if (!required.includes(midi)) {
       // Wrong note — penalise and let the player try again
       setFeedback('incorrect');
-      setSession(p => ({ ...p, at: p.at + 1 }));
+      setSession(p => { const n = { ...p, at: p.at + 1 }; sessionRef.current = n; return n; });
       setHistory(h => [...h.slice(-99), false]);
       recordAttempt(false, null);
       if (feedbackTimeout.current) clearTimeout(feedbackTimeout.current);
@@ -149,7 +152,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
       // All required notes are physically held right now → correct!
       isAdvancing.current = true;
       setFeedback('correct');
-      setSession(p => ({ at: p.at + 1, co: p.co + 1 }));
+      setSession(p => { const n = { at: p.at + 1, co: p.co + 1 }; sessionRef.current = n; return n; });
       setHistory(h => [...h.slice(-99), true]);
       recordAttempt(true, null);
       if (feedbackTimeout.current) clearTimeout(feedbackTimeout.current);
@@ -274,7 +277,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
 
             <div style={{ display: 'flex', gap: 8, marginTop: 12, flexShrink: 0 }}>
               <button className="skip-btn" onClick={skipToNext}>Skip →</button>
-              <button className="stop-btn" onClick={onStop}>Stop</button>
+              <button className="stop-btn" onClick={() => onStop({ total_attempts: sessionRef.current.at, total_correct: sessionRef.current.co })}>Stop</button>
               <button className="reset-btn" onClick={() => { isAdvancing.current = false; if (feedbackTimeout.current) clearTimeout(feedbackTimeout.current); setCurrentColIdx(0); setFeedback(null); }}>Restart</button>
             </div>
           </div>

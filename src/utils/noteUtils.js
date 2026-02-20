@@ -46,17 +46,3 @@ export function typeToVfDuration(type) {
   return map[type] ?? 'q';
 }
 
-export function loadStats() {
-  try {
-    const data = localStorage.getItem('microsight-stats');
-    return data ? JSON.parse(data) : { ta: 0, tc: 0, br: null, rt: [] };
-  } catch {
-    return { ta: 0, tc: 0, br: null, rt: [] };
-  }
-}
-
-export function saveStats(stats) {
-  try {
-    localStorage.setItem('microsight-stats', JSON.stringify(stats));
-  } catch { /* ignore */ }
-}

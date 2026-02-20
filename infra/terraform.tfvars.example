@@ -1,0 +1,29 @@
+# Copy this file to terraform.tfvars and fill in real values.
+# NEVER commit terraform.tfvars — it contains secrets.
+
+aws_region  = "us-east-1"
+environment = "prod"
+
+# ── Domain ───────────────────────────────────────────────────────────────────
+domain_name    = "microsight.app"
+hosted_zone_id = "Z0123456789ABCDEFGHIJ"  # From Route 53 console
+
+# ── RDS ──────────────────────────────────────────────────────────────────────
+db_password = "REPLACE_ME_AT_LEAST_16_CHARS"
+
+# ── App secrets (generate with: openssl rand -hex 32) ────────────────────────
+jwt_access_secret  = "REPLACE_WITH_64_HEX_CHARS"
+jwt_refresh_secret = "REPLACE_WITH_64_HEX_CHARS"
+
+# ── Google OAuth (from Google Cloud Console) ──────────────────────────────────
+google_client_id     = "REPLACE_ME.apps.googleusercontent.com"
+google_client_secret = "REPLACE_ME"
+
+# ── EC2 / ASG (defaults are usually fine) ────────────────────────────────────
+# ec2_instance_type    = "t3.small"
+# asg_min_size         = 2
+# asg_max_size         = 6
+# asg_desired_capacity = 2
+
+# ── RDS ──────────────────────────────────────────────────────────────────────
+# db_instance_class = "db.t3.medium"

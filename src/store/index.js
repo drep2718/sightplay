@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { loadStats, saveStats } from '../utils/noteUtils.js';
+import { api } from '../hooks/useApi.js';
 
 export const useStore = create((set, get) => ({
   // ── MIDI ──────────────────────────────────────────
@@ -57,11 +57,74 @@ export const useStore = create((set, get) => ({
 
   resetSession: () => set({ session: { at: 0, co: 0, rt: [] } }),
 
-  // ── All-time stats ────────────────────────────────
-  stats: loadStats(),
+  // ── All-time stats (loaded from API after login) ──
+  stats: { ta: 0, tc: 0, br: null, rt: [] },
 
   /**
-   * Record a single attempt. Updates both session and all-time stats.
+   * Load preferences and stats from the API after login.
+   * Also handles the one-time localStorage migration.
+   */
+  loadUserData: async (user) => {
+    try {
+      // Load preferences
+      const { data: prefData } = await api.get('/users/preferences');
+      const p = prefData.preferences;
+      set({
+        mode:         p.mode,
+        clef:         p.clef,
+        tier:         p.tier,
+        accidentals:  p.accidentals,
+        showKeyboard: p.show_keyboard,
+        kbSize:       p.kb_size,
+        bpm:          p.bpm,
+        timeSig:      p.time_sig,
+        intervalMax:  p.interval_max,
+      });
+    } catch { /* use defaults */ }
+
+    try {
+      // Load all-time stats
+      const { data: statsData } = await api.get('/stats');
+      const s = statsData.stats;
+      set({
+        stats: {
+          ta: s.total_attempts,
+          tc: s.total_correct,
+          br: s.best_reaction,
+          rt: s.reaction_times || [],
+        },
+      });
+    } catch { /* use defaults */ }
+
+    // One-time localStorage migration
+    if (!user?.migrated_local_storage) {
+      try {
+        const raw = localStorage.getItem('microsight-stats');
+        if (raw) {
+          const local = JSON.parse(raw);
+          if (local.ta > 0) {
+            await api.put('/stats', local);
+            localStorage.removeItem('microsight-stats');
+            // Refresh stats from API after migration
+            const { data: statsData } = await api.get('/stats');
+            const s = statsData.stats;
+            set({
+              stats: {
+                ta: s.total_attempts,
+                tc: s.total_correct,
+                br: s.best_reaction,
+                rt: s.reaction_times || [],
+              },
+            });
+          }
+        }
+      } catch { /* ignore migration errors */ }
+    }
+  },
+
+  /**
+   * Record a single attempt. Updates session stats locally and syncs
+   * the all-time stats to the API (best-effort, no await).
    * @param {boolean} correct
    * @param {number|null} reactionTimeMs
    */
@@ -75,7 +138,7 @@ export const useStore = create((set, get) => ({
       },
     }));
 
-    // Update all-time stats
+    // Update all-time stats locally (optimistic)
     const prev    = get().stats;
     const updated = {
       ta: prev.ta + 1,
@@ -89,7 +152,9 @@ export const useStore = create((set, get) => ({
           ? [...(prev.rt ?? []).slice(-99), reactionTimeMs]
           : prev.rt,
     };
-    saveStats(updated);
     set({ stats: updated });
+
+    // Fire-and-forget API sync
+    api.patch('/stats/attempt', { correct, reactionTimeMs }).catch(() => {});
   },
 }));

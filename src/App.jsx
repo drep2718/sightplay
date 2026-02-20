@@ -1,4 +1,5 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'; // useMemo used for kbRange
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Sidebar from './components/Sidebar.jsx';
 import StatsPanel from './components/StatsPanel.jsx';
 import KeyboardViz, { getKbRange } from './components/KeyboardViz.jsx';
@@ -6,8 +7,14 @@ import FlashMode from './components/modes/FlashMode.jsx';
 import IntervalMode from './components/modes/IntervalMode.jsx';
 import MeasureMode from './components/modes/MeasureMode.jsx';
 import SheetMusicMode from './components/modes/SheetMusicMode.jsx';
+import ProtectedRoute from './components/ProtectedRoute.jsx';
+import AuthCallbackPage from './pages/AuthCallbackPage.jsx';
+import LoginPage from './pages/LoginPage.jsx';
+import { AuthProvider } from './contexts/AuthContext.jsx';
+import { useAuth } from './hooks/useAuth.js';
 import { useMidi } from './hooks/useMidi.js';
 import { useStore } from './store/index.js';
+import { api } from './hooks/useApi.js';
 
 // Computer keyboard → MIDI note fallback (C4=60 .. C5=72)
 const KEY_MAP = {
@@ -16,35 +23,44 @@ const KEY_MAP = {
   u: 70, j: 71, k: 72,
 };
 
-export default function App() {
+function MainApp() {
   const {
-    mode,
+    mode, clef, tier, accidentals, bpm, timeSig, intervalMax,
     showKeyboard, kbSize, detectedMidiRange,
     pressedKeys,
     addPressedKey, removePressedKey, updateDetectedRange,
-    resetSession,
+    resetSession, loadUserData,
   } = useStore();
 
-  const [isPlaying, setIsPlaying] = useState(false);
+  const { user } = useAuth();
+  const [isPlaying, setIsPlaying]       = useState(false);
+  const [sessionId, setSessionId]       = useState(null);
+  const activeModeHandlerRef            = useRef(null);
 
-  // Each active mode registers its noteOn handler here.
-  // Using a ref avoids stale closures and prevents unnecessary re-renders.
-  const activeModeHandlerRef = useRef(null);
+  // Load user data (preferences + stats + migration) after login
+  useEffect(() => {
+    if (user) {
+      loadUserData(user);
+    }
+  }, [user, loadUserData]);
 
-  /** Called by mode components to register/unregister their handler. */
+  // Listen for forced-logout events from the axios interceptor
+  useEffect(() => {
+    const handler = () => { setIsPlaying(false); };
+    window.addEventListener('auth:logout', handler);
+    return () => window.removeEventListener('auth:logout', handler);
+  }, []);
+
   const registerModeHandler = useCallback((fn) => {
     activeModeHandlerRef.current = fn ?? null;
   }, []);
 
-  /** Central MIDI note-on dispatcher */
   const handleNoteOn = useCallback((midi) => {
     activeModeHandlerRef.current?.(midi);
   }, []);
 
-  // Wire hardware MIDI
   useMidi(handleNoteOn);
 
-  // Computer keyboard fallback
   useEffect(() => {
     const down = (e) => {
       if (e.repeat) return;
@@ -66,30 +82,46 @@ export default function App() {
     };
   }, [addPressedKey, removePressedKey, updateDetectedRange, handleNoteOn]);
 
-  const startSession = useCallback(() => { resetSession(); setIsPlaying(true); }, [resetSession]);
-  const stopSession  = useCallback(() => setIsPlaying(false), []);
+  const startSession = useCallback(async () => {
+    resetSession();
+    setIsPlaying(true);
 
-  // Stop the session whenever the mode changes
-  useEffect(() => { setIsPlaying(false); }, [mode]);
+    // Create a session record in the DB
+    try {
+      const { data } = await api.post('/sessions', {
+        mode, clef, tier, accidentals, bpm, time_sig: timeSig, interval_max: intervalMax,
+      });
+      setSessionId(data.session.id);
+    } catch { /* non-critical */ }
+  }, [resetSession, mode, clef, tier, accidentals, bpm, timeSig, intervalMax]);
+
+  const stopSession = useCallback(async (finalStats) => {
+    setIsPlaying(false);
+
+    if (sessionId) {
+      try {
+        await api.post(`/sessions/${sessionId}/end`, finalStats || {});
+      } catch { /* non-critical */ }
+      setSessionId(null);
+    }
+  }, [sessionId]);
+
+  // Stop session when mode changes
+  useEffect(() => { setIsPlaying(false); setSessionId(null); }, [mode]);
 
   const kbRange = useMemo(
     () => getKbRange(kbSize, detectedMidiRange),
     [kbSize, detectedMidiRange]
   );
 
-  const modeProps = {
-    isPlaying,
-    onStart: startSession,
-    onStop: stopSession,
-    registerModeHandler,
-  };
+  const modeProps = { isPlaying, onStart: startSession, onStop: stopSession, registerModeHandler };
 
   return (
     <div className="app-layout">
       <Sidebar
         isPlaying={isPlaying}
-        onModeChange={stopSession}
-        onStopSession={stopSession}
+        onModeChange={() => stopSession()}
+        onStopSession={() => stopSession()}
       />
 
       <div className="main-content">
@@ -110,5 +142,23 @@ export default function App() {
 
       <StatsPanel />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login"         element={<LoginPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route path="/*" element={
+            <ProtectedRoute>
+              <MainApp />
+            </ProtectedRoute>
+          } />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }

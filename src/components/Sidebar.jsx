@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useCallback, useRef } from 'react';
 import { useStore } from '../store/index.js';
+import { useAuth } from '../hooks/useAuth.js';
+import { api } from '../hooks/useApi.js';
 import { TIERS } from '../utils/generators.js';
 import { countWhiteKeys } from '../utils/noteUtils.js';
 
@@ -16,6 +18,34 @@ const CLEFS = [
   { id: 'both',   label: 'Both' },
 ];
 
+/** Save preferences to API, debounced by 2 s. */
+function useDebouncedPrefsSave() {
+  const timerRef = useRef(null);
+  const storeRef = useRef(null);
+
+  // Keep a ref to the current store state so the timer always uses fresh values
+  const store = useStore();
+  storeRef.current = store;
+
+  return useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      const s = storeRef.current;
+      api.put('/users/preferences', {
+        mode:         s.mode,
+        clef:         s.clef,
+        tier:         s.tier,
+        accidentals:  s.accidentals,
+        show_keyboard: s.showKeyboard,
+        kb_size:      s.kbSize,
+        bpm:          s.bpm,
+        time_sig:     s.timeSig,
+        interval_max: s.intervalMax,
+      }).catch(() => {}); // fire-and-forget
+    }, 2000);
+  }, []);
+}
+
 export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
   const {
     midiStatus, midiInputs, selectedInput, setSelectedInput,
@@ -31,20 +61,26 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
     detectedMidiRange,
   } = useStore();
 
+  const { user, logout } = useAuth();
+  const savePrefs = useDebouncedPrefsSave();
+
   function handleModeClick(newMode) {
     if (isPlaying) onStopSession();
     setMode(newMode);
     onModeChange?.(newMode);
+    savePrefs();
   }
 
   function handleClefClick(newClef) {
     if (isPlaying) onStopSession();
     setClef(newClef);
+    savePrefs();
   }
 
   function handleTierClick(newTier) {
     if (isPlaying) onStopSession();
     setTier(newTier);
+    savePrefs();
   }
 
   const midiDotClass = `midi-dot ${midiStatus}`;
@@ -130,7 +166,7 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
           <span className="setting-label">Accidentals</span>
           <button
             className={`toggle-switch${accidentals ? ' on' : ''}`}
-            onClick={() => setAccidentals(!accidentals)}
+            onClick={() => { setAccidentals(!accidentals); savePrefs(); }}
           />
         </div>
 
@@ -138,7 +174,7 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
           <span className="setting-label">Show Keyboard</span>
           <button
             className={`toggle-switch${showKeyboard ? ' on' : ''}`}
-            onClick={() => setShowKeyboard(!showKeyboard)}
+            onClick={() => { setShowKeyboard(!showKeyboard); savePrefs(); }}
           />
         </div>
 
@@ -159,7 +195,7 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
                 <button
                   key={s}
                   className={`kb-size-btn${kbSize === s ? ' active' : ''}`}
-                  onClick={() => setKbSize(s)}
+                  onClick={() => { setKbSize(s); savePrefs(); }}
                 >
                   {s === 'auto' ? 'Auto' : s}
                 </button>
@@ -175,13 +211,15 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
                 <span className="setting-label">BPM</span>
                 <span className="setting-value">{bpm}</span>
               </div>
-              <input type="range" min={40} max={180} value={bpm} onChange={e => setBpm(+e.target.value)} />
+              <input type="range" min={40} max={180} value={bpm}
+                onChange={e => { setBpm(+e.target.value); savePrefs(); }} />
             </div>
             <div className="setting-row" style={{ marginTop: 8 }}>
               <span className="setting-label">Time Sig</span>
               <div className="btn-group">
                 {['3/4', '4/4'].map(t => (
-                  <button key={t} className={timeSig === t ? 'active' : ''} onClick={() => setTimeSig(t)}>{t}</button>
+                  <button key={t} className={timeSig === t ? 'active' : ''}
+                    onClick={() => { setTimeSig(t); savePrefs(); }}>{t}</button>
                 ))}
               </div>
             </div>
@@ -194,7 +232,8 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
               <span className="setting-label">Max Interval</span>
               <span className="setting-value">{intervalMax} st</span>
             </div>
-            <input type="range" min={2} max={12} value={intervalMax} onChange={e => setIntervalMax(+e.target.value)} />
+            <input type="range" min={2} max={12} value={intervalMax}
+              onChange={e => { setIntervalMax(+e.target.value); savePrefs(); }} />
           </div>
         )}
       </div>
@@ -217,6 +256,27 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.5 }}>
             {TIERS[tier]?.label}
           </div>
+        </div>
+      )}
+
+      {/* Account */}
+      {user && (
+        <div className="sidebar-section" style={{ marginTop: 'auto' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>
+            {user.display_name || user.email}
+            {user.role === 'admin' && (
+              <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--accent)', opacity: 0.8 }}>
+                admin
+              </span>
+            )}
+          </div>
+          <button
+            style={{ fontSize: 12, color: 'var(--text-dim)', background: 'none', border: 'none',
+                     cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
+            onClick={logout}
+          >
+            Sign out
+          </button>
         </div>
       )}
     </div>

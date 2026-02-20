@@ -1,0 +1,11 @@
+# Never commit real variable values
+terraform.tfvars
+*.tfvars
+!*.tfvars.example
+
+# Terraform state and lock files (use remote backend instead)
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfplan
