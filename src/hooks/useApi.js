@@ -1,6 +1,8 @@
 import axios from 'axios';
 import { getMemoryToken, setMemoryToken } from '../contexts/AuthContext.jsx';
 
+const IS_DEMO = import.meta.env.VITE_DEMO_MODE === 'true';
+
 // Single shared instance — interceptors set up once at module level
 const api = axios.create({ baseURL: '/api', withCredentials: true });
 
@@ -27,7 +29,7 @@ api.interceptors.response.use(
   async (error) => {
     const original = error.config;
 
-    if (error.response?.status !== 401 || original._retry) {
+    if (error.response?.status !== 401 || original._retry || IS_DEMO) {
       return Promise.reject(error);
     }
 

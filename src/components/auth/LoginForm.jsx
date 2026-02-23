@@ -5,7 +5,7 @@ import GoogleButton from './GoogleButton.jsx';
 const IS_DEMO = import.meta.env.VITE_DEMO_MODE === 'true';
 
 export default function LoginForm({ onSuccess, onSwitchToRegister }) {
-  const { login } = useAuth();
+  const { login, demoLogin } = useAuth();
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [error, setError]       = useState('');
@@ -25,17 +25,9 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }) {
     }
   }
 
-  async function handleDemoLogin() {
-    setError('');
-    setLoading(true);
-    try {
-      await login('demo@microsight.app', 'demo');
-      onSuccess?.();
-    } catch (err) {
-      setError('Demo login failed');
-    } finally {
-      setLoading(false);
-    }
+  function handleDemoLogin() {
+    demoLogin();
+    onSuccess?.();
   }
 
   return (

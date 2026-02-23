@@ -3,6 +3,15 @@ import axios from 'axios';
 
 export const AuthContext = createContext(null);
 
+const IS_DEMO = import.meta.env.VITE_DEMO_MODE === 'true';
+
+const DEMO_USER = {
+  id: 'demo',
+  email: 'demo@microsight.app',
+  displayName: 'Demo User',
+  role: 'user',
+};
+
 // Access token lives in JS memory only — never localStorage, never a readable cookie
 let _memoryToken = null;
 
@@ -61,8 +70,14 @@ export function AuthProvider({ children }) {
     }
   }, [scheduleRefresh]);
 
+  const demoLogin = useCallback(() => {
+    _memoryToken = 'demo';
+    setUser(DEMO_USER);
+  }, []);
+
   // On mount: attempt silent refresh using the HttpOnly refresh cookie
   useEffect(() => {
+    if (IS_DEMO) { setLoading(false); return; }
     silentRefresh().finally(() => setLoading(false));
     return () => clearTimer();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -105,7 +120,7 @@ export function AuthProvider({ children }) {
   }, [scheduleRefresh]);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, handleOAuthCallback }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, handleOAuthCallback, demoLogin }}>
       {children}
     </AuthContext.Provider>
   );
