@@ -2,8 +2,8 @@ import { STEP_TO_SEMITONE, typeToVfDuration, durationToBeats } from './noteUtils
 
 /**
  * @typedef {{ midi: number[], duration: string, isRest: boolean, staff: 'treble'|'bass', beatPos: number }} NoteEvent
- * @typedef {{ trebleIdx: number|null, bassIdx: number|null, allMidi: number[] }} Column
- * @typedef {{ treble: NoteEvent[], bass: NoteEvent[], columns: Column[] }} MeasureData
+ * @typedef {{ trebleIdx: number|null, bassIdx: number|null, allMidi: number[], beatPos: number, globalBeatPos: number }} Column
+ * @typedef {{ treble: NoteEvent[], bass: NoteEvent[], columns: Column[], beatsPerMeasure: number }} MeasureData
  * @typedef {{ title: string, timeSignature: string, tempo: number,
  *             events: NoteEvent[], measures: MeasureData[], hasBothStaves: boolean,
  *             columns: Column[], measureColStarts: number[] }} ParsedMusic
@@ -31,7 +31,8 @@ function createColumns(treble, bass) {
     const bassMidi   = bi >= 0 ? bass[bi].midi   : [];
     // Deduplicate across hands (e.g. unison notes)
     const allMidi = [...new Set([...trebleMidi, ...bassMidi])];
-    return { trebleIdx: ti >= 0 ? ti : null, bassIdx: bi >= 0 ? bi : null, allMidi };
+    // globalBeatPos is assigned after measure assembly; beatPos is the local value
+    return { trebleIdx: ti >= 0 ? ti : null, bassIdx: bi >= 0 ? bi : null, allMidi, beatPos: pos, globalBeatPos: 0 };
   });
 }
 
@@ -139,23 +140,36 @@ export function parseMusicXML(xmlString) {
     );
   }
 
+  // Build the per-measure timeBeats lookup (from each part's measure data)
+  const perMeasureBeats = (parts.length >= 2
+    ? parsePartToMeasures(parts[0])
+    : parsePartToMeasures(parts[0])
+  ).measures.map(m => m.timeBeats);
+
   const numMeasures = Math.max(trebleMeasureEvents.length, bassMeasureEvents.length);
+  let globalBeat = 0;
   const measures = Array.from({ length: numMeasures }, (_, i) => {
-    const treble = trebleMeasureEvents[i] ?? [];
-    const bass   = bassMeasureEvents[i]   ?? [];
-    return { treble, bass, columns: createColumns(treble, bass) };
+    const treble  = trebleMeasureEvents[i] ?? [];
+    const bass    = bassMeasureEvents[i]   ?? [];
+    const bpM     = perMeasureBeats[i] ?? timeBeats;
+    const columns = createColumns(treble, bass);
+    // Stamp globalBeatPos on each column
+    columns.forEach(col => { col.globalBeatPos = globalBeat + col.beatPos; });
+    globalBeat += bpM;
+    return { treble, bass, columns, beatsPerMeasure: bpM };
   });
 
-  const hasBothStaves  = measures.some(m => m.bass.length > 0);
-  const columns        = measures.flatMap(m => m.columns);
+  const hasBothStaves    = measures.some(m => m.bass.length > 0);
+  const columns          = measures.flatMap(m => m.columns);
   const measureColStarts = buildMeasureColStarts(measures);
-  const events         = measures.flatMap(m => [...m.treble, ...m.bass]);
+  const events           = measures.flatMap(m => [...m.treble, ...m.bass]);
 
-  const title    = doc.querySelector('movement-title')?.textContent
-                || doc.querySelector('work-title')?.textContent
-                || 'Untitled';
-  const tempoEl  = doc.querySelector('sound[tempo]');
-  const tempo    = tempoEl ? parseInt(tempoEl.getAttribute('tempo')) : 80;
+  const title   = doc.querySelector('movement-title')?.textContent
+               || doc.querySelector('work-title')?.textContent
+               || 'Untitled';
+  // Prefer the first explicit tempo marking; fall back to 80 bpm
+  const tempoEl = doc.querySelector('sound[tempo]');
+  const tempo   = tempoEl ? parseInt(tempoEl.getAttribute('tempo')) : 80;
 
   return { title, timeSignature: `${timeBeats}/${timeBeatType}`, tempo, events, measures, hasBothStaves, columns, measureColStarts };
 }
@@ -215,16 +229,21 @@ export async function parseMidiFile(buffer) {
     const bassMeasures   = noteTracks[1] ? trackToMeasureEvents(noteTracks[1], 'bass') : [];
 
     const numMeasures = Math.max(trebleMeasures.length, bassMeasures.length);
+    let globalBeat = 0;
     const measures = Array.from({ length: numMeasures }, (_, i) => {
-      const treble = trebleMeasures[i] ?? [];
-      const bass   = bassMeasures[i]   ?? [];
-      return { treble, bass, columns: createColumns(treble, bass) };
+      const treble  = trebleMeasures[i] ?? [];
+      const bass    = bassMeasures[i]   ?? [];
+      const columns = createColumns(treble, bass);
+      // Stamp globalBeatPos on each column
+      columns.forEach(col => { col.globalBeatPos = globalBeat + col.beatPos; });
+      globalBeat += beatsPerMeasure;
+      return { treble, bass, columns, beatsPerMeasure };
     });
 
-    const hasBothStaves  = measures.some(m => m.bass.length > 0);
-    const columns        = measures.flatMap(m => m.columns);
+    const hasBothStaves    = measures.some(m => m.bass.length > 0);
+    const columns          = measures.flatMap(m => m.columns);
     const measureColStarts = buildMeasureColStarts(measures);
-    const events         = measures.flatMap(m => [...m.treble, ...m.bass]);
+    const events           = measures.flatMap(m => [...m.treble, ...m.bass]);
 
     return {
       title: midi.header.name || 'MIDI Import',

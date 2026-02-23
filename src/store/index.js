@@ -42,6 +42,9 @@ export const useStore = create((set, get) => ({
   timeSig:      '4/4',
   intervalMax:  8,
 
+  showNoteNames:  false,
+  metroVolume:    1,
+
   setMode:        (mode)    => set({ mode }),
   setClef:        (clef)    => set({ clef }),
   setTier:        (tier)    => set({ tier }),
@@ -51,6 +54,31 @@ export const useStore = create((set, get) => ({
   setBpm:         (bpm)     => set({ bpm }),
   setTimeSig:     (sig)     => set({ timeSig: sig }),
   setIntervalMax: (max)     => set({ intervalMax: max }),
+  setShowNoteNames:(v)      => set({ showNoteNames: v }),
+  setMetroVolume: (v)       => set({ metroVolume: v }),
+
+  // ── Note miss heatmap ─────────────────────────────
+  noteMissCounts: {},  // { [midi]: count } — correct note they failed to play
+
+  recordNoteMiss: (correctMidi) => set(s => ({
+    noteMissCounts: {
+      ...s.noteMissCounts,
+      [correctMidi]: (s.noteMissCounts[correctMidi] ?? 0) + 1,
+    },
+  })),
+  resetHeatmap: () => set({ noteMissCounts: {} }),
+
+  // ── Piece library ─────────────────────────────────
+  pieces: [],
+
+  loadPieces: async () => {
+    try {
+      const { data } = await api.get('/pieces');
+      set({ pieces: data.pieces ?? [] });
+    } catch { /* non-critical */ }
+  },
+
+  setPieces: (pieces) => set({ pieces }),
 
   // ── Session stats (reset on each new session) ─────
   session: { at: 0, co: 0, rt: [] },
@@ -59,6 +87,9 @@ export const useStore = create((set, get) => ({
 
   // ── All-time stats (loaded from API after login) ──
   stats: { ta: 0, tc: 0, br: null, rt: [] },
+
+  // ── Session history (last N sessions, loaded from API) ────
+  sessionHistory: [],
 
   /**
    * Load preferences and stats from the API after login.
@@ -95,6 +126,12 @@ export const useStore = create((set, get) => ({
         },
       });
     } catch { /* use defaults */ }
+
+    try {
+      // Load recent session history for the progress chart
+      const { data: sessData } = await api.get('/sessions?limit=20');
+      set({ sessionHistory: sessData.sessions ?? [] });
+    } catch { /* non-critical */ }
 
     // One-time localStorage migration
     if (!user?.migrated_local_storage) {

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import StaffDisplay from '../StaffDisplay.jsx';
 import { useStore } from '../../store/index.js';
+import { useAudioSynth } from '../../hooks/useAudioSynth.js';
 import { midiToDisplayName } from '../../utils/noteUtils.js';
 import {
   generateRandomNote,
@@ -19,8 +20,9 @@ function buildFinalStats(session) {
 }
 
 export default function FlashMode({ isPlaying, onStart, onStop, registerModeHandler }) {
-  const { clef, tier, accidentals, recordAttempt } = useStore();
+  const { clef, tier, accidentals, recordAttempt, recordNoteMiss, showNoteNames } = useStore();
   const pressedKeys = useStore(s => s.pressedKeys);
+  const { playNote } = useAudioSynth();
 
   const [currentNote, setCurrentNote] = useState(null); // number[]
   const [activeClef, setActiveClef]   = useState('treble');
@@ -32,6 +34,9 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
   // Keep volatile state in a ref so the handler never goes stale
   const S = useRef({});
   S.current = { clef, tier, accidentals, currentNote, activeClef, isPlaying, session };
+
+  const playNoteRef = useRef(playNote);
+  playNoteRef.current = playNote;
 
   // Mirror pressedKeys in a ref (avoids stale closure without causing handler recreation)
   const pressedKeysRef = useRef(pressedKeys);
@@ -93,6 +98,7 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
       const wrongNote = !s.currentNote.includes(midi);
 
       if (allHeld) {
+        s.currentNote.forEach(n => playNoteRef.current(n));
         setFeedback('correct');
         setSession(p => { const n = { at: p.at + 1, co: p.co + 1, rt: rt ? [...p.rt, rt] : p.rt }; sessionRef.current = n; return n; });
         setHistory(h => [...h.slice(-49), true]);
@@ -100,6 +106,8 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
         clearFeedbackTimer();
         feedbackTimeout.current = setTimeout(nextNote, 500);
       } else if (wrongNote) {
+        s.currentNote.forEach(n => playNoteRef.current(n, 0.2));
+        s.currentNote.forEach(n => recordNoteMiss(n));
         setFeedback('incorrect');
         setSession(p => { const n = { ...p, at: p.at + 1 }; sessionRef.current = n; return n; });
         setHistory(h => [...h.slice(-49), false]);
@@ -109,6 +117,12 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
       }
     } else {
       const ok = midi === s.currentNote[0];
+      if (ok) {
+        playNoteRef.current(s.currentNote[0]);
+      } else {
+        playNoteRef.current(s.currentNote[0], 0.2);
+        recordNoteMiss(s.currentNote[0]);
+      }
       setFeedback(ok ? 'correct' : 'incorrect');
       setSession(p => { const n = { at: p.at + 1, co: p.co + (ok ? 1 : 0), rt: ok && rt ? [...p.rt, rt] : p.rt }; sessionRef.current = n; return n; });
       setHistory(h => [...h.slice(-49), ok]);
@@ -118,7 +132,7 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
         ? setTimeout(nextNote, 400)
         : setTimeout(() => setFeedback(null), 500);
     }
-  }, [nextNote, recordAttempt]); // stable
+  }, [nextNote, recordAttempt, recordNoteMiss]); // stable
 
   // Register handler with App
   useEffect(() => {
@@ -168,6 +182,7 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
               feedback={feedback}
               grandStaff={clef === 'both'}
               activeClef={activeClef}
+              showNoteNames={showNoteNames}
             />
             <div className={`note-name-display${feedback ? ` ${feedback}` : ''}`}>{noteLabel()}</div>
             <button className="stop-btn" onClick={() => onStop(buildFinalStats(sessionRef.current))}>Stop</button>

@@ -17,7 +17,9 @@ router.put('/',
   body('ta').isInt({ min: 0 }),
   body('tc').isInt({ min: 0 }),
   body('br').optional({ nullable: true }).isInt({ min: 0 }),
-  body('rt').optional().isArray(),
+  // Validate each element of the rt array is a non-negative integer
+  body('rt').optional().isArray({ max: 100 }),
+  body('rt.*').optional().isInt({ min: 0, max: 60000 }),
   validate,
   ctrl.migrateStats
 );

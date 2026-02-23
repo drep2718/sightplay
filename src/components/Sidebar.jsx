@@ -59,6 +59,9 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
     timeSig, setTimeSig,
     intervalMax, setIntervalMax,
     detectedMidiRange,
+    showNoteNames, setShowNoteNames,
+    metroVolume, setMetroVolume,
+    noteMissCounts, resetHeatmap,
   } = useStore();
 
   const { user, logout } = useAuth();
@@ -178,6 +181,27 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
           />
         </div>
 
+        <div className="setting-row" style={{ marginTop: 8 }}>
+          <span className="setting-label">Note Names</span>
+          <button
+            className={`toggle-switch${showNoteNames ? ' on' : ''}`}
+            onClick={() => setShowNoteNames(!showNoteNames)}
+          />
+        </div>
+
+        {showKeyboard && Object.keys(noteMissCounts).length > 0 && (
+          <div className="setting-row" style={{ marginTop: 8 }}>
+            <span className="setting-label">Heatmap</span>
+            <button
+              className="reset-btn"
+              style={{ fontSize: 11, padding: '3px 8px' }}
+              onClick={resetHeatmap}
+            >
+              Clear
+            </button>
+          </div>
+        )}
+
         {showKeyboard && (
           <div style={{ marginTop: 8 }}>
             <div className="setting-row">
@@ -204,9 +228,20 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
           </div>
         )}
 
+        {(mode === 'measure' || mode === 'sheet') && (
+          <div className="slider-row" style={{ marginTop: 12 }}>
+            <div className="setting-row">
+              <span className="setting-label">Metro Volume</span>
+              <span className="setting-value">{Math.round(metroVolume * 100)}%</span>
+            </div>
+            <input type="range" min={0} max={100} value={Math.round(metroVolume * 100)}
+              onChange={e => setMetroVolume(e.target.value / 100)} />
+          </div>
+        )}
+
         {mode === 'measure' && (
           <>
-            <div className="slider-row" style={{ marginTop: 12 }}>
+            <div className="slider-row" style={{ marginTop: 8 }}>
               <div className="setting-row">
                 <span className="setting-label">BPM</span>
                 <span className="setting-value">{bpm}</span>

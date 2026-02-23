@@ -71,6 +71,8 @@ async function migrateLocalStorage(userId, { ta, tc, br, rt }) {
  */
 async function recordAttempt(userId, { correct, reactionTimeMs }) {
   if (correct && reactionTimeMs != null) {
+    // Append new value and keep the most-recent 100 entries (in chronological order).
+    // Previous query had a broken ORDER BY scalar subquery that did not actually sort.
     await query(
       `UPDATE all_time_stats
        SET total_attempts = total_attempts + 1,
@@ -81,13 +83,14 @@ async function recordAttempt(userId, { correct, reactionTimeMs }) {
              ELSE best_reaction
            END,
            reaction_times = (
-             SELECT jsonb_agg(v)
+             SELECT COALESCE(jsonb_agg(v), '[]'::jsonb)
              FROM (
-               SELECT value AS v FROM jsonb_array_elements(reaction_times)
-               UNION ALL SELECT to_jsonb($2::int)
+               SELECT value AS v, ordinality
+               FROM jsonb_array_elements(reaction_times || to_jsonb($2::int))
+               WITH ORDINALITY
+               ORDER BY ordinality
+               OFFSET GREATEST(0, jsonb_array_length(reaction_times) - 99)
              ) t
-             ORDER BY (SELECT COUNT(*) FROM jsonb_array_elements(reaction_times)) DESC
-             LIMIT 100
            )
        WHERE user_id = $1`,
       [userId, reactionTimeMs]

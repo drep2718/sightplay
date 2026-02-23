@@ -30,6 +30,7 @@ function MainApp() {
     pressedKeys,
     addPressedKey, removePressedKey, updateDetectedRange,
     resetSession, loadUserData,
+    noteMissCounts, showNoteNames,
   } = useStore();
 
   const { user } = useAuth();
@@ -136,6 +137,8 @@ function MainApp() {
             targetKeys={[]}
             midiLow={kbRange.lo}
             midiHigh={kbRange.hi}
+            heatmapData={Object.keys(noteMissCounts).length > 0 ? noteMissCounts : null}
+            showAllNoteNames={showNoteNames}
           />
         )}
       </div>

@@ -6,9 +6,10 @@ import {
   Voice,
   Formatter,
   Accidental,
+  Annotation,
   StaveConnector,
 } from 'vexflow';
-import { getVexNoteInfo } from '../utils/noteUtils.js';
+import { getVexNoteInfo, midiToDisplayName } from '../utils/noteUtils.js';
 
 const FEEDBACK_COLORS = new Set(['#4ade80', '#f87171']);
 
@@ -92,6 +93,9 @@ function buildStaveNote({ midis, duration, clef, color }) {
  *   mode?: string,
  *   timeSignature?: string,
  *   grandStaff?: boolean,
+ *   showNoteNames?: boolean,
+ *   dimTreble?: boolean,
+ *   dimBass?: boolean,
  * }} props
  */
 export default function StaffDisplay({
@@ -105,6 +109,9 @@ export default function StaffDisplay({
   mode,
   timeSignature,
   grandStaff,
+  showNoteNames,
+  dimTreble,
+  dimBass,
 }) {
   const containerRef = useRef(null);
 
@@ -149,19 +156,19 @@ export default function StaffDisplay({
 
         if (hasBothHands) {
           // Render notes on respective staves
-          renderNotes(ctx, trebleStave, 'treble', stW, true, trebleMeasureNotes, null, null, timeSignature);
-          renderNotes(ctx, bassStave,   'bass',   stW, true, bassMeasureNotes,   null, null, timeSignature);
+          renderNotes(ctx, trebleStave, 'treble', stW, true, trebleMeasureNotes, null, null, timeSignature, showNoteNames, dimTreble);
+          renderNotes(ctx, bassStave,   'bass',   stW, true, bassMeasureNotes,   null, null, timeSignature, showNoteNames, dimBass);
         } else {
           // Single hand — original behaviour
           const noteStave = noteClef === 'treble' ? trebleStave : bassStave;
-          renderNotes(ctx, noteStave, noteClef, stW, isMeasureMode, measureNotes, notes, feedback, timeSignature);
+          renderNotes(ctx, noteStave, noteClef, stW, isMeasureMode, measureNotes, notes, feedback, timeSignature, showNoteNames, false);
         }
       } else {
         const stave = new Stave(stX, 20, stW);
         stave.addClef(noteClef);
         if (isMeasureMode && timeSignature) stave.addTimeSignature(timeSignature);
         stave.setContext(ctx).draw();
-        renderNotes(ctx, stave, noteClef, stW, isMeasureMode, measureNotes, notes, feedback, timeSignature);
+        renderNotes(ctx, stave, noteClef, stW, isMeasureMode, measureNotes, notes, feedback, timeSignature, showNoteNames, false);
       }
 
       const svg = el.querySelector('svg');
@@ -169,15 +176,26 @@ export default function StaffDisplay({
     } catch (err) {
       console.warn('VexFlow render error:', err);
     }
-  }, [notes, measureNotes, trebleMeasureNotes, bassMeasureNotes, clef, activeClef, feedback, mode, timeSignature, grandStaff]);
+  }, [notes, measureNotes, trebleMeasureNotes, bassMeasureNotes, clef, activeClef, feedback, mode, timeSignature, grandStaff, showNoteNames, dimTreble, dimBass]);
 
   return <div ref={containerRef} className="staff-container" />;
 }
 
-function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, notes, feedback, timeSignature) {
+function addNoteNameAnnotation(sn, midi) {
+  try {
+    const ann = new Annotation(midiToDisplayName(midi))
+      .setFont('DM Sans', 8)
+      .setVerticalJustification(Annotation.VerticalJustify.BOTTOM);
+    sn.addModifier(ann, 0);
+  } catch { /* ignore annotation errors */ }
+}
+
+function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, notes, feedback, timeSignature, showNoteNames, dim) {
   const noteColor = feedback === 'correct'   ? '#4ade80'
                   : feedback === 'incorrect' ? '#f87171'
                   : '#e8e4df';
+
+  const applyDim = dim ? { opacity: 0.35 } : null;
 
   if (isMeasureMode && measureNotes?.length) {
     const vfNotes = measureNotes.map(n => {
@@ -185,7 +203,10 @@ function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, 
                   : n.played === false ? '#f87171'
                   : n.current         ? '#d4a853'
                   : '#e8e4df';
-      return buildStaveNote({ midis: [n.midi], duration: n.duration, clef, color });
+      const sn = buildStaveNote({ midis: [n.midi], duration: n.duration, clef, color });
+      if (showNoteNames) addNoteNameAnnotation(sn, n.midi);
+      if (applyDim) sn.getSVGElement?.()?.setAttribute('opacity', '0.35');
+      return sn;
     });
 
     // Sum total ticks for Voice
@@ -197,12 +218,21 @@ function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, 
     voice.setStrict(false);
     voice.addTickables(vfNotes);
     new Formatter().joinVoices([voice]).format([voice], staveWidth - 80);
-    voice.draw(ctx, stave);
+
+    if (applyDim) {
+      const grp = ctx.openGroup('dim-staff');
+      voice.draw(ctx, stave);
+      ctx.closeGroup();
+      if (grp) grp.setAttribute('opacity', '0.35');
+    } else {
+      voice.draw(ctx, stave);
+    }
     return;
   }
 
   if (notes?.length) {
     const sn = buildStaveNote({ midis: notes, duration: 'q', clef, color: noteColor });
+    if (showNoteNames) addNoteNameAnnotation(sn, notes[0]);
     const voice = new Voice({ num_beats: 1, beat_value: 4 });
     voice.setStrict(false);
     voice.addTickables([sn]);

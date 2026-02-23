@@ -17,6 +17,7 @@ const usersRoutes    = require('./routes/users');
 const statsRoutes    = require('./routes/stats');
 const sessionsRoutes = require('./routes/sessions');
 const adminRoutes    = require('./routes/admin');
+const piecesRoutes   = require('./routes/pieces');
 
 function createApp() {
   const app = express();
@@ -26,12 +27,34 @@ function createApp() {
 
   // ── Security headers ───────────────────────────────────────
   app.use(helmet({
-    contentSecurityPolicy: false, // Handled by Vite / CDN for the SPA
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc:     ["'self'"],
+        scriptSrc:      ["'self'"],
+        styleSrc:       ["'self'", "'unsafe-inline'"],   // Vite inlines critical CSS
+        fontSrc:        ["'self'", 'https://fonts.gstatic.com'],
+        imgSrc:         ["'self'", 'data:'],
+        connectSrc:     ["'self'"],
+        mediaSrc:       ["'self'"],
+        objectSrc:      ["'none'"],
+        frameSrc:       ["'self'"],                     // for PDF embed
+        frameAncestors: ["'none'"],
+        upgradeInsecureRequests: [],
+      },
+    },
     hsts: {
       maxAge: 31536000,
       includeSubDomains: true,
       preload: true,
     },
+    // Prevent MIME-type sniffing
+    noSniff: true,
+    // Disable X-Powered-By
+    hidePoweredBy: true,
+    // Clickjacking protection
+    frameguard: { action: 'deny' },
+    // XSS protection header (legacy browsers)
+    xssFilter: true,
   }));
 
   // ── CORS ────────────────────────────────────────────────────
@@ -44,7 +67,11 @@ function createApp() {
   }));
 
   // ── Body parsing ────────────────────────────────────────────
-  app.use(express.json({ limit: '10kb' }));
+  // Skip 10 KB limit for /api/pieces (handled per-route with 2 MB limit)
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/pieces')) return next();
+    express.json({ limit: '10kb' })(req, res, next);
+  });
   app.use(cookieParser());
 
   // ── Logging ─────────────────────────────────────────────────
@@ -64,6 +91,8 @@ function createApp() {
   app.use('/api/stats',    statsRoutes);
   app.use('/api/sessions', sessionsRoutes);
   app.use('/api/admin',    adminRoutes);
+  // Pieces need a larger body limit (file_content can be up to ~1.5 MB)
+  app.use('/api/pieces',   express.json({ limit: '2mb' }), piecesRoutes);
 
   // ── Serve the Vite-built SPA in production ──────────────────
   // The dist/ folder lives one level above server/ in the bundle.

@@ -26,7 +26,7 @@ export function getKbRange(kbSize, detectedRange) {
   return { lo, hi };
 }
 
-export default function KeyboardViz({ pressedKeys, targetKeys, midiLow, midiHigh }) {
+export default function KeyboardViz({ pressedKeys, targetKeys, midiLow, midiHigh, heatmapData, showAllNoteNames }) {
   const containerRef = useRef(null);
   const [keyWidth, setKeyWidth] = useState(18);
 
@@ -43,6 +43,19 @@ export default function KeyboardViz({ pressedKeys, targetKeys, midiLow, midiHigh
     return () => window.removeEventListener('resize', measure);
   }, [midiLow, midiHigh]);
 
+  // Heatmap: compute max misses for normalization
+  const heatmapValues = heatmapData ? Object.values(heatmapData) : [];
+  const maxMisses = heatmapValues.length > 0 ? Math.max(...heatmapValues) : 1;
+
+  function heatColor(midi) {
+    if (!heatmapData) return null;
+    const count = heatmapData[midi];
+    if (!count) return null;
+    const ratio = count / maxMisses;
+    const hue   = Math.round(120 - ratio * 120); // 120=green → 0=red
+    return `hsl(${hue}, 80%, 45%)`;
+  }
+
   const blackW = Math.max(6, Math.round(keyWidth * 0.65));
   const whiteKeys = [];
   const blackKeys = [];
@@ -51,30 +64,38 @@ export default function KeyboardViz({ pressedKeys, targetKeys, midiLow, midiHigh
   for (let m = midiLow; m <= midiHigh; m++) {
     if (!isBlackKey(m)) {
       const isC = m % 12 === 0;
-      const showLabel = isC || m === midiLow;
+      const showLabel = showAllNoteNames || isC || m === midiLow;
+      const heat = heatColor(m);
+      const isPressedOrTarget = pressedKeys.includes(m) || targetKeys.includes(m);
       const cls = [
         'key-white',
         pressedKeys.includes(m) ? 'pressed' : '',
         targetKeys.includes(m)  ? 'target'  : '',
       ].filter(Boolean).join(' ');
 
+      const extraStyle = heat && !isPressedOrTarget ? { background: heat } : {};
+
       whiteKeys.push(
-        <div key={`w${m}`} className={cls} style={{ width: keyWidth }} title={midiToDisplayName(m)}>
+        <div key={`w${m}`} className={cls} style={{ width: keyWidth, ...extraStyle }} title={midiToDisplayName(m)}>
           {showLabel && <span className="key-label">{midiToDisplayName(m)}</span>}
         </div>
       );
       whiteIndex++;
     } else {
       const leftPx = whiteIndex * keyWidth - blackW / 2;
+      const heat = heatColor(m);
+      const isPressedOrTarget = pressedKeys.includes(m) || targetKeys.includes(m);
       const cls = [
         'key-black',
         pressedKeys.includes(m) ? 'pressed' : '',
         targetKeys.includes(m)  ? 'target'  : '',
       ].filter(Boolean).join(' ');
 
+      const extraStyle = heat && !isPressedOrTarget ? { background: heat } : {};
+
       blackKeys.push(
         <div key={`b${m}`} className="key-black-wrapper" style={{ left: leftPx, width: blackW }}>
-          <div className={cls} style={{ width: '100%' }} title={midiToDisplayName(m)} />
+          <div className={cls} style={{ width: '100%', ...extraStyle }} title={midiToDisplayName(m)} />
         </div>
       );
     }
