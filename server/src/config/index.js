@@ -8,10 +8,17 @@
 
 let _config = null;
 
+const DEMO_MODE = process.env.DEMO_MODE === 'true';
+
+// Fallback JWT secrets used only when DEMO_MODE=true (not secure for production)
+const DEMO_JWT_ACCESS_SECRET  = 'demo-access-secret-microsight-not-for-production';
+const DEMO_JWT_REFRESH_SECRET = 'demo-refresh-secret-microsight-not-for-production';
+
 function loadConfig() {
   if (_config) return _config;
 
   _config = {
+    demo: DEMO_MODE,
     db: {
       host:     process.env.DB_HOST     || 'localhost',
       port:     parseInt(process.env.DB_PORT || '5432', 10),
@@ -25,8 +32,8 @@ function loadConfig() {
       password: process.env.REDIS_PASSWORD || undefined,
     },
     jwt: {
-      accessSecret:  requireEnv('JWT_ACCESS_SECRET'),
-      refreshSecret: requireEnv('JWT_REFRESH_SECRET'),
+      accessSecret:  DEMO_MODE ? DEMO_JWT_ACCESS_SECRET  : requireEnv('JWT_ACCESS_SECRET'),
+      refreshSecret: DEMO_MODE ? DEMO_JWT_REFRESH_SECRET : requireEnv('JWT_REFRESH_SECRET'),
     },
     google: {
       clientId:     process.env.GOOGLE_CLIENT_ID     || '',
@@ -50,5 +57,7 @@ function requireEnv(key) {
   if (!val) throw new Error(`Required environment variable ${key} is not set`);
   return val;
 }
+
+module.exports.DEMO_MODE = DEMO_MODE;
 
 module.exports = { loadConfig, getConfig };

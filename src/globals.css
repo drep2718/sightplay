@@ -677,6 +677,23 @@ body::before {
   background: var(--border);
 }
 
+.demo-login-btn {
+  width: 100%;
+  padding: 11px;
+  background: var(--accent-gold);
+  color: #0a0a0f;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: background .15s;
+}
+.demo-login-btn:hover:not(:disabled) { background: var(--accent-gold-dim); }
+.demo-login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
 .google-btn {
   width: 100%;
   display: flex;

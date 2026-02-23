@@ -18,6 +18,7 @@ const statsRoutes    = require('./routes/stats');
 const sessionsRoutes = require('./routes/sessions');
 const adminRoutes    = require('./routes/admin');
 const piecesRoutes   = require('./routes/pieces');
+const { demoStubs, DEMO_MODE } = require('./middleware/demoMode');
 
 function createApp() {
   const app = express();
@@ -83,7 +84,10 @@ function createApp() {
   app.use(generalLimiter());
 
   // ── Health check (no auth, used by ALB target group) ────────
-  app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+  app.get('/api/health', (_req, res) => res.json({ status: 'ok', demo: DEMO_MODE }));
+
+  // ── Demo mode stubs (short-circuits data routes without DB) ─
+  app.use(demoStubs);
 
   // ── Routes ──────────────────────────────────────────────────
   app.use('/api/auth',     authRoutes);

@@ -1,14 +1,37 @@
 'use strict';
 
+const jwt = require('jsonwebtoken');
 const authService = require('../services/authService');
 const userService = require('../services/userService');
-const { getConfig } = require('../config/index');
+const { getConfig, DEMO_MODE } = require('../config/index');
+
+// ── Demo mode helpers ──────────────────────────────────────────
+const DEMO_USER = {
+  id:           '00000000-0000-0000-0000-000000000001',
+  email:        'demo@microsight.app',
+  display_name: 'Demo User',
+  role:         'user',
+};
+
+function issueDemoTokens() {
+  const { jwt: jwtConfig } = getConfig();
+  const accessToken = jwt.sign(
+    { sub: DEMO_USER.id, role: DEMO_USER.role, iss: 'microsight-api' },
+    jwtConfig.accessSecret,
+    { expiresIn: '7d' }   // long-lived — no refresh needed in demo mode
+  );
+  return accessToken;
+}
 
 function clientIp(req) {
   return req.ip || req.connection?.remoteAddress;
 }
 
 async function register(req, res, next) {
+  if (DEMO_MODE) {
+    const accessToken = issueDemoTokens();
+    return res.status(201).json({ accessToken, user: DEMO_USER });
+  }
   try {
     const { email, password, displayName } = req.body;
     const { user, accessToken, refreshRaw, expiresAt } = await authService.register(
@@ -24,6 +47,10 @@ async function register(req, res, next) {
 }
 
 async function login(req, res, next) {
+  if (DEMO_MODE) {
+    const accessToken = issueDemoTokens();
+    return res.json({ accessToken, user: DEMO_USER });
+  }
   try {
     const { email, password } = req.body;
     const { user, accessToken, refreshRaw, expiresAt } = await authService.login(
@@ -39,6 +66,10 @@ async function login(req, res, next) {
 }
 
 async function refresh(req, res, next) {
+  if (DEMO_MODE) {
+    const accessToken = issueDemoTokens();
+    return res.json({ accessToken, user: DEMO_USER });
+  }
   try {
     const raw = req.cookies?.refreshToken;
     const { user, accessToken, refreshRaw, expiresAt } = await authService.refreshTokens(
@@ -54,6 +85,9 @@ async function refresh(req, res, next) {
 }
 
 async function logout(req, res, next) {
+  if (DEMO_MODE) {
+    return res.json({ message: 'Logged out' });
+  }
   try {
     const raw = req.cookies?.refreshToken;
     await authService.logout(raw);
@@ -93,6 +127,7 @@ async function googleCallback(req, res, next) {
 }
 
 async function me(req, res, next) {
+  if (DEMO_MODE) return res.json({ user: DEMO_USER });
   try {
     const user = await userService.getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });

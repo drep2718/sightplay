@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useAuth } from '../../hooks/useAuth.js';
 import GoogleButton from './GoogleButton.jsx';
 
+const IS_DEMO = import.meta.env.VITE_DEMO_MODE === 'true';
+
 export default function LoginForm({ onSuccess, onSwitchToRegister }) {
   const { login } = useAuth();
   const [email, setEmail]       = useState('');
@@ -23,13 +25,39 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }) {
     }
   }
 
+  async function handleDemoLogin() {
+    setError('');
+    setLoading(true);
+    try {
+      await login('demo@microsight.app', 'demo');
+      onSuccess?.();
+    } catch (err) {
+      setError('Demo login failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="auth-form">
       <h2>Sign in to MicroSight</h2>
 
-      <GoogleButton />
+      {IS_DEMO && (
+        <>
+          <button
+            type="button"
+            className="demo-login-btn"
+            onClick={handleDemoLogin}
+            disabled={loading}
+          >
+            Try Demo — no account needed
+          </button>
+          <div className="auth-divider"><span>or sign in</span></div>
+        </>
+      )}
 
-      <div className="auth-divider"><span>or</span></div>
+      {!IS_DEMO && <GoogleButton />}
+      {!IS_DEMO && <div className="auth-divider"><span>or</span></div>}
 
       <form onSubmit={handleSubmit}>
         <div className="form-group">
