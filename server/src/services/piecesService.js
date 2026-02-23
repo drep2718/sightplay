@@ -1,13 +1,12 @@
 'use strict';
 
-const { getDb } = require('../config/db');
+const { query } = require('../config/database');
 
-const MAX_PIECES    = 50;
+const MAX_PIECES     = 50;
 const MAX_FILE_BYTES = 1.5 * 1024 * 1024; // 1.5 MB
 
 async function listPieces(userId) {
-  const db = getDb();
-  const { rows } = await db.query(
+  const { rows } = await query(
     `SELECT id, title, file_type, tempo, time_sig, total_cols,
             has_both_staves, is_favorite, last_played_at, play_count, created_at
      FROM pieces
@@ -28,10 +27,8 @@ async function savePiece(userId, { title, file_type, file_content, tempo, time_s
     throw Object.assign(new Error('File too large (max 1.5 MB)'), { status: 413 });
   }
 
-  const db = getDb();
-
   // Check piece count limit
-  const { rows: countRows } = await db.query(
+  const { rows: countRows } = await query(
     'SELECT COUNT(*) AS cnt FROM pieces WHERE user_id = $1',
     [userId]
   );
@@ -40,7 +37,7 @@ async function savePiece(userId, { title, file_type, file_content, tempo, time_s
   }
 
   // Upsert by (user_id, title)
-  const { rows } = await db.query(
+  const { rows } = await query(
     `INSERT INTO pieces (user_id, title, file_type, file_content, tempo, time_sig, total_cols, has_both_staves)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (user_id, title) DO UPDATE SET
@@ -58,8 +55,7 @@ async function savePiece(userId, { title, file_type, file_content, tempo, time_s
 }
 
 async function getPieceContent(userId, pieceId) {
-  const db = getDb();
-  const { rows } = await db.query(
+  const { rows } = await query(
     'SELECT id, title, file_type, file_content FROM pieces WHERE id = $1 AND user_id = $2',
     [pieceId, userId]
   );
@@ -68,8 +64,7 @@ async function getPieceContent(userId, pieceId) {
 }
 
 async function toggleFavorite(userId, pieceId) {
-  const db = getDb();
-  const { rows } = await db.query(
+  const { rows } = await query(
     `UPDATE pieces SET is_favorite = NOT is_favorite
      WHERE id = $1 AND user_id = $2
      RETURNING id, is_favorite`,
@@ -80,8 +75,7 @@ async function toggleFavorite(userId, pieceId) {
 }
 
 async function deletePiece(userId, pieceId) {
-  const db = getDb();
-  const { rowCount } = await db.query(
+  const { rowCount } = await query(
     'DELETE FROM pieces WHERE id = $1 AND user_id = $2',
     [pieceId, userId]
   );
@@ -89,8 +83,7 @@ async function deletePiece(userId, pieceId) {
 }
 
 async function markPlayed(userId, pieceId) {
-  const db = getDb();
-  const { rows } = await db.query(
+  const { rows } = await query(
     `UPDATE pieces
      SET last_played_at = NOW(), play_count = play_count + 1
      WHERE id = $1 AND user_id = $2
