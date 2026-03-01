@@ -199,13 +199,19 @@ function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, 
 
   if (isMeasureMode && measureNotes?.length) {
     const vfNotes = measureNotes.map(n => {
+      if (n.isRest) {
+        // Invisible ghost rest — keeps the voice in sync with the other stave
+        const restKey = clef === 'bass' ? 'd/3' : 'b/4';
+        const sn = new StaveNote({ keys: [restKey], duration: n.duration + 'r', clef });
+        sn.setStyle({ fillStyle: 'transparent', strokeStyle: 'transparent' });
+        return sn;
+      }
       const color = n.played === true  ? '#4ade80'
                   : n.played === false ? '#f87171'
                   : n.current         ? '#d4a853'
                   : '#e8e4df';
-      const sn = buildStaveNote({ midis: [n.midi], duration: n.duration, clef, color });
-      if (showNoteNames) addNoteNameAnnotation(sn, n.midi);
-      if (applyDim) sn.getSVGElement?.()?.setAttribute('opacity', '0.35');
+      const sn = buildStaveNote({ midis: Array.isArray(n.midi) ? n.midi : [n.midi], duration: n.duration, clef, color });
+      if (showNoteNames) addNoteNameAnnotation(sn, Array.isArray(n.midi) ? n.midi[0] : n.midi);
       return sn;
     });
 

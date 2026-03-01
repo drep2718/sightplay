@@ -206,8 +206,10 @@ export async function parseMidiFile(buffer) {
         const events = measureMap.get(measureIdx);
 
         const last     = events.at(-1);
-        const timeDiff = last ? Math.abs(note.time - last._time) : Infinity;
-        if (last && timeDiff < 0.03) {
+        // Use tick-based threshold (1/8 beat = 32nd note) so chord detection
+        // is tempo-invariant and works for both quantized and humanized MIDI.
+        const tickDiff = last ? Math.abs(note.ticks - last._ticks) : Infinity;
+        if (last && tickDiff < ppq / 8) {
           last.midi.push(note.midi);
           last.midi.sort((a, b) => a - b);
         } else {
@@ -215,13 +217,13 @@ export async function parseMidiFile(buffer) {
             note.duration >= 1.8  ? 'w' :
             note.duration >= 0.9  ? 'h' :
             note.duration >= 0.45 ? 'q' : '8';
-          events.push({ midi: [note.midi], duration: dur, isRest: false, staff, beatPos, _time: note.time });
+          events.push({ midi: [note.midi], duration: dur, isRest: false, staff, beatPos, _ticks: note.ticks });
         }
       }
 
       const maxMeasure = measureMap.size > 0 ? Math.max(...measureMap.keys()) : 0;
       return Array.from({ length: maxMeasure + 1 }, (_, i) =>
-        (measureMap.get(i) ?? []).map(({ _time, ...e }) => e)
+        (measureMap.get(i) ?? []).map(({ _ticks, ...e }) => e)
       );
     }
 

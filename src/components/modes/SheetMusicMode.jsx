@@ -113,27 +113,39 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
   const currentMeasure  = parsedMusic?.measures[currentMeasureIdx] ?? { treble: [], bass: [], columns: [] };
   const measureColStart = parsedMusic?.measureColStarts[currentMeasureIdx] ?? 0;
 
-  // ── Annotated notes (both staves) ─────────────────────────────────────────
-  const trebleAnnotated = useMemo(() => currentMeasure.treble.map((event, ti) => {
-    const colLocalIdx = currentMeasure.columns.findIndex(c => c.trebleIdx === ti);
-    const colAbs      = colLocalIdx >= 0 ? measureColStart + colLocalIdx : -1;
-    return {
-      midi:     event.midi[0] ?? 60,
-      duration: event.duration,
-      played:   colAbs >= 0 && colAbs < currentColIdx ? true : null,
-      current:  colAbs === currentColIdx,
-    };
+  // ── Annotated notes for both staves (colors driven by column index) ─────────
+  // Build column-aligned arrays so VexFlow can space treble and bass notes
+  // against each other. For each column, whichever stave has no note gets a
+  // ghost rest (isRest: true) whose duration matches the other stave's note.
+  // This gives both voices the same tick sequence and aligns them correctly.
+  const trebleAnnotated = useMemo(() => currentMeasure.columns.map((col, localColIdx) => {
+    const colAbs = measureColStart + localColIdx;
+    if (col.trebleIdx !== null) {
+      const event = currentMeasure.treble[col.trebleIdx];
+      return {
+        midi:     event.midi,
+        duration: event.duration,
+        played:   colAbs < currentColIdx ? true : null,
+        current:  colAbs === currentColIdx,
+      };
+    }
+    const dur = col.bassIdx !== null ? currentMeasure.bass[col.bassIdx].duration : 'q';
+    return { midi: [], duration: dur, isRest: true, played: null, current: false };
   }), [currentMeasure, measureColStart, currentColIdx]);
 
-  const bassAnnotated = useMemo(() => currentMeasure.bass.map((event, bi) => {
-    const colLocalIdx = currentMeasure.columns.findIndex(c => c.bassIdx === bi);
-    const colAbs      = colLocalIdx >= 0 ? measureColStart + colLocalIdx : -1;
-    return {
-      midi:     event.midi[0] ?? 60,
-      duration: event.duration,
-      played:   colAbs >= 0 && colAbs < currentColIdx ? true : null,
-      current:  colAbs === currentColIdx,
-    };
+  const bassAnnotated = useMemo(() => currentMeasure.columns.map((col, localColIdx) => {
+    const colAbs = measureColStart + localColIdx;
+    if (col.bassIdx !== null) {
+      const event = currentMeasure.bass[col.bassIdx];
+      return {
+        midi:     event.midi,
+        duration: event.duration,
+        played:   colAbs < currentColIdx ? true : null,
+        current:  colAbs === currentColIdx,
+      };
+    }
+    const dur = col.trebleIdx !== null ? currentMeasure.treble[col.trebleIdx].duration : 'q';
+    return { midi: [], duration: dur, isRest: true, played: null, current: false };
   }), [currentMeasure, measureColStart, currentColIdx]);
 
   // ── File loading ───────────────────────────────────────────────────────────
