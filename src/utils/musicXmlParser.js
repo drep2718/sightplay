@@ -1,7 +1,7 @@
 import { STEP_TO_SEMITONE, typeToVfDuration, durationToBeats } from './noteUtils.js';
 
 /**
- * @typedef {{ midi: number[], duration: string, isRest: boolean, staff: 'treble'|'bass', beatPos: number }} NoteEvent
+ * @typedef {{ midi: number[], duration: string, isRest: boolean, staff: 'treble'|'bass', beatPos: number, ornament?: string|null }} NoteEvent
  * @typedef {{ trebleIdx: number|null, bassIdx: number|null, allMidi: number[], beatPos: number, globalBeatPos: number }} Column
  * @typedef {{ treble: NoteEvent[], bass: NoteEvent[], columns: Column[], beatsPerMeasure: number }} MeasureData
  * @typedef {{ title: string, timeSignature: string, tempo: number,
@@ -66,6 +66,17 @@ function parsePartToMeasures(partEl) {
       const staffNum   = parseInt(noteEl.querySelector('staff')?.textContent ?? '1');
       const staff      = staffNum === 2 ? 'bass' : 'treble';
 
+      const ornamentsEl = noteEl.querySelector('ornaments');
+      let ornament = null;
+      if (ornamentsEl) {
+        if      (ornamentsEl.querySelector('trill-mark'))       ornament = 'trill';
+        else if (ornamentsEl.querySelector('wavy-line'))        ornament = 'trill';
+        else if (ornamentsEl.querySelector('turn'))             ornament = 'turn';
+        else if (ornamentsEl.querySelector('mordent'))          ornament = 'mordent';
+        else if (ornamentsEl.querySelector('inverted-mordent')) ornament = 'inverted-mordent';
+        else if (ornamentsEl.querySelector('tremolo'))          ornament = 'tremolo';
+      }
+
       // Chord notes don't advance the beat cursor
       const beatPos = isChord && events.length > 0 && !events.at(-1).isRest
         ? events.at(-1).beatPos
@@ -74,7 +85,7 @@ function parsePartToMeasures(partEl) {
       if (isRest) {
         if (!isChord) {
           beatCursor[staff] += durationToBeats(vfDuration);
-          events.push({ midi: [], duration: vfDuration, isRest: true, staff, beatPos });
+          events.push({ midi: [], duration: vfDuration, isRest: true, staff, beatPos, ornament: null });
         }
         continue;
       }
@@ -92,7 +103,7 @@ function parsePartToMeasures(partEl) {
         events.at(-1).midi.push(midi);
         events.at(-1).midi.sort((a, b) => a - b);
       } else {
-        events.push({ midi: [midi], duration: vfDuration, isRest: false, staff, beatPos });
+        events.push({ midi: [midi], duration: vfDuration, isRest: false, staff, beatPos, ornament });
         beatCursor[staff] += durationToBeats(vfDuration);
       }
     }

@@ -44,6 +44,8 @@ export const useStore = create((set, get) => ({
 
   showNoteNames:  false,
   metroVolume:    1,
+  metronomeEnabled: true,
+  noteSoundEnabled: true,
 
   setMode:        (mode)    => set({ mode }),
   setClef:        (clef)    => set({ clef }),
@@ -56,6 +58,12 @@ export const useStore = create((set, get) => ({
   setIntervalMax: (max)     => set({ intervalMax: max }),
   setShowNoteNames:(v)      => set({ showNoteNames: v }),
   setMetroVolume: (v)       => set({ metroVolume: v }),
+  setMetronomeEnabled: (v)  => set({ metronomeEnabled: v }),
+  setNoteSoundEnabled: (v)  => set({ noteSoundEnabled: v }),
+
+  // ── Highlighted keys (for note-click in StaffDisplay) ────────────────────
+  highlightedMidi: [],
+  setHighlightedMidi: (midis) => set({ highlightedMidi: midis }),
 
   // ── Note miss heatmap ─────────────────────────────
   noteMissCounts: {},  // { [midi]: count } — correct note they failed to play

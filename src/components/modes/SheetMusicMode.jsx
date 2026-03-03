@@ -24,21 +24,95 @@ function getTimingLabel(errorMs) {
   return                              { label: 'Late',     cls: 'timing-off' };
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function getOrnamentDescription(ornament, midis) {
+  const root  = midis.length ? midiToDisplayName(midis[0])     : '?';
+  const above = midis.length ? midiToDisplayName(midis[0] + 2) : '?';
+  const below = midis.length ? midiToDisplayName(midis[0] - 2) : '?';
+  switch (ornament) {
+    case 'trill':            return `Rapidly alternate between ${root} and ${above} for the full duration. Start on the written note.`;
+    case 'turn':             return `Play ${above}, ${root}, ${below}, ${root} in quick succession.`;
+    case 'mordent':          return `Quickly play ${root}, ${below}, ${root}.`;
+    case 'inverted-mordent': return `Quickly play ${root}, ${above}, ${root}.`;
+    case 'tremolo':          return `Rapidly repeat ${root} for its full duration.`;
+    default:                 return null;
+  }
+}
+
+// ─── Score Overview ───────────────────────────────────────────────────────────
+
+function ScoreOverview({ parsedMusic, startMeasure, endMeasure, onSelectMeasure }) {
+  const isGrand = parsedMusic.hasBothStaves;
+  const cols = isGrand ? 2 : 3;
+
+  return (
+    <div className="score-overview" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+      {parsedMusic.measures.map((measure, mIdx) => {
+        const isSelected = mIdx >= startMeasure && mIdx <= endMeasure;
+
+        const trebleNotes = measure.columns.map((col) => {
+          if (col.trebleIdx !== null) {
+            const event = measure.treble[col.trebleIdx];
+            return { midi: event.midi, duration: event.duration, played: null, current: false, ornament: event.ornament ?? null };
+          }
+          const dur = col.bassIdx !== null ? measure.bass[col.bassIdx].duration : 'q';
+          return { midi: [], duration: dur, isRest: true, played: null, current: false, ornament: null };
+        });
+
+        const bassNotes = measure.columns.map((col) => {
+          if (col.bassIdx !== null) {
+            const event = measure.bass[col.bassIdx];
+            return { midi: event.midi, duration: event.duration, played: null, current: false, ornament: event.ornament ?? null };
+          }
+          const dur = col.trebleIdx !== null ? measure.treble[col.trebleIdx].duration : 'q';
+          return { midi: [], duration: dur, isRest: true, played: null, current: false, ornament: null };
+        });
+
+        return (
+          <div
+            key={mIdx}
+            className={`score-overview-measure${isSelected ? ' selected' : ''}`}
+            onClick={() => onSelectMeasure(mIdx)}
+          >
+            <div className="score-overview-num">M{mIdx + 1}</div>
+            <div className={`score-overview-staff${isGrand ? ' grand' : ''}`}>
+              <StaffDisplay
+                trebleMeasureNotes={isGrand ? trebleNotes : null}
+                bassMeasureNotes={isGrand ? bassNotes : null}
+                measureNotes={!isGrand ? trebleNotes : null}
+                clef="treble"
+                grandStaff={isGrand}
+                mode="sheet"
+                timeSignature={parsedMusic.timeSignature}
+                showNoteNames={false}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Guided Practice ─────────────────────────────────────────────────────────
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1.0];
 
 function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
-  const { recordAttempt, recordNoteMiss, setBpm, setTimeSig, bpm, metroVolume, showNoteNames, pieces, loadPieces } = useStore(s => ({
-    recordAttempt:  s.recordAttempt,
-    recordNoteMiss: s.recordNoteMiss,
-    setBpm:         s.setBpm,
-    setTimeSig:     s.setTimeSig,
-    bpm:            s.bpm,
-    metroVolume:    s.metroVolume,
-    showNoteNames:  s.showNoteNames,
-    pieces:         s.pieces,
-    loadPieces:     s.loadPieces,
+  const { recordAttempt, recordNoteMiss, setBpm, setTimeSig, bpm, metroVolume, metronomeEnabled, noteSoundEnabled, showNoteNames, pieces, loadPieces, setHighlightedMidi } = useStore(s => ({
+    recordAttempt:    s.recordAttempt,
+    recordNoteMiss:   s.recordNoteMiss,
+    setBpm:           s.setBpm,
+    setTimeSig:       s.setTimeSig,
+    bpm:              s.bpm,
+    metroVolume:      s.metroVolume,
+    metronomeEnabled: s.metronomeEnabled,
+    noteSoundEnabled: s.noteSoundEnabled,
+    showNoteNames:    s.showNoteNames,
+    pieces:           s.pieces,
+    loadPieces:       s.loadPieces,
+    setHighlightedMidi: s.setHighlightedMidi,
   }));
   const { playNote } = useAudioSynth();
 
@@ -59,17 +133,27 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
   const [practiceSpeed,  setPracticeSpeed]  = useState(1.0);
   const [saveToast,      setSaveToast]      = useState(null);
   const [saving,         setSaving]         = useState(false);
+  const [alreadySavedId,       setAlreadySavedId]       = useState(null);
+  const [peekActive,           setPeekActive]           = useState(false);
+  const [hintsUsed,            setHintsUsed]            = useState(0);
+  const [notePopup,            setNotePopup]            = useState(null);
+  const [practiceStartMeasure, setPracticeStartMeasure] = useState(0);
+  const [practiceEndMeasure,   setPracticeEndMeasure]   = useState(0);
+  const [showOverview,         setShowOverview]         = useState(false);
+  const [startStep,            setStartStep]            = useState(1);
+  const [previewPlaying,       setPreviewPlaying]       = useState(false);
   // raw file for re-saving
   const rawFileRef = useRef({ type: null, content: null, name: null });
 
   const sessionRef        = useRef({ at: 0, co: 0 });
+  const previewTimersRef  = useRef([]);
   const fileInputRef      = useRef(null);
   const feedbackTimeout   = useRef(null);
   const timingTimeout     = useRef(null);
   const isAdvancing       = useRef(false);
   const practiceStartRef  = useRef(0);  // performance.now() when playing began
   const S                 = useRef({});
-  S.current = { parsedMusic, currentColIdx, isPlaying, phase, handMode };
+  S.current = { parsedMusic, currentColIdx, isPlaying, phase, handMode, peekActive, noteSoundEnabled };
 
   // Load library on mount
   useEffect(() => { loadPieces(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -82,6 +166,14 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
 
   const totalCols = parsedMusic?.columns.length ?? 0;
 
+  // ── Practice range derived columns ────────────────────────────────────────
+  const practiceStartCol = parsedMusic?.measureColStarts[practiceStartMeasure] ?? 0;
+  const practiceEndCol   = parsedMusic
+    ? (practiceEndMeasure < parsedMusic.measures.length - 1
+        ? parsedMusic.measureColStarts[practiceEndMeasure + 1]
+        : totalCols)
+    : 0;
+
   // Effective BPM respects practiceSpeed
   const effectiveBpm = parsedMusic
     ? Math.max(20, Math.round(parsedMusic.tempo * practiceSpeed))
@@ -92,7 +184,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     bpm:            effectiveBpm,
     beatsPerMeasure,
     subdivision,
-    volume:         metroVolume,
+    volume:         metronomeEnabled ? metroVolume : 0,
   });
 
   const playNoteRef      = useRef(playNote);
@@ -127,10 +219,11 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
         duration: event.duration,
         played:   colAbs < currentColIdx ? true : null,
         current:  colAbs === currentColIdx,
+        ornament: event.ornament ?? null,
       };
     }
     const dur = col.bassIdx !== null ? currentMeasure.bass[col.bassIdx].duration : 'q';
-    return { midi: [], duration: dur, isRest: true, played: null, current: false };
+    return { midi: [], duration: dur, isRest: true, played: null, current: false, ornament: null };
   }), [currentMeasure, measureColStart, currentColIdx]);
 
   const bassAnnotated = useMemo(() => currentMeasure.columns.map((col, localColIdx) => {
@@ -142,10 +235,11 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
         duration: event.duration,
         played:   colAbs < currentColIdx ? true : null,
         current:  colAbs === currentColIdx,
+        ornament: event.ornament ?? null,
       };
     }
     const dur = col.trebleIdx !== null ? currentMeasure.treble[col.trebleIdx].duration : 'q';
-    return { midi: [], duration: dur, isRest: true, played: null, current: false };
+    return { midi: [], duration: dur, isRest: true, played: null, current: false, ornament: null };
   }), [currentMeasure, measureColStart, currentColIdx]);
 
   // ── File loading ───────────────────────────────────────────────────────────
@@ -159,6 +253,11 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     setPhase('idle');
     setPracticeSpeed(1.0);
     setHandMode('both');
+    setAlreadySavedId(null);
+    setPracticeStartMeasure(0);
+    setPracticeEndMeasure(0);
+    setShowOverview(false);
+    setStartStep(1);
     const fresh = { at: 0, co: 0 };
     sessionRef.current = fresh;
     setSession(fresh);
@@ -190,6 +289,8 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
         setParseError('No playable notes found in the file.');
       } else {
         setParsedMusic(result);
+        setPracticeStartMeasure(0);
+        setPracticeEndMeasure(result.measures.length - 1);
         // Auto-apply the piece's tempo and time signature
         setBpm(result.tempo);
         setTimeSig(result.timeSignature);
@@ -212,11 +313,13 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     setPhase('idle');
     setPracticeSpeed(1.0);
     setHandMode('both');
+    setStartStep(1);
     const fresh = { at: 0, co: 0 };
     sessionRef.current = fresh;
     setSession(fresh);
     isAdvancing.current = false;
     rawFileRef.current = { type: piece.file_type, content: piece.file_content, name: piece.title };
+    setAlreadySavedId(piece.id);
 
     try {
       let result;
@@ -233,6 +336,8 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
         setParseError('No playable notes found in this piece.');
       } else {
         setParsedMusic(result);
+        setPracticeStartMeasure(0);
+        setPracticeEndMeasure(result.measures.length - 1);
         setBpm(result.tempo);
         setTimeSig(result.timeSignature);
       }
@@ -251,7 +356,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     setSaveToast(null);
     try {
       const title = parsedMusic.title !== 'Unknown' ? parsedMusic.title : raw.name || 'Untitled';
-      await api.post('/pieces', {
+      const res = await api.post('/pieces', {
         title,
         file_type:      raw.type,
         file_content:   raw.content,
@@ -260,16 +365,45 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
         total_cols:     parsedMusic.columns.length,
         has_both_staves: parsedMusic.hasBothStaves,
       });
+      setAlreadySavedId(res.data.piece?.id ?? true);
       setSaveToast({ msg: 'Saved to library!', ok: true });
       loadPieces();
     } catch (err) {
-      const msg = err?.response?.data?.error || 'Failed to save';
+      const status = err?.response?.status;
+      const msg = status === 413 ? 'File too large'
+                : status === 422 ? 'Library full (50 piece limit)'
+                : status === 400 ? 'Invalid file data'
+                : err?.response?.data?.error || 'Failed to save';
       setSaveToast({ msg, ok: false });
     } finally {
       setSaving(false);
       setTimeout(() => setSaveToast(null), 2500);
     }
   }
+
+  // ── Note click handler (clickable staff) ─────────────────────────────────
+  // Popup stays until the user clicks a different note — no timer, no auto-dismiss.
+  const handleNoteClickInStaff = useCallback((colIdx, midis, ornament) => {
+    setHighlightedMidi(midis);
+    setNotePopup({ midis, ornament });
+  }, [setHighlightedMidi]);
+
+  // ── Peek: highlight next required note(s) until played ───────────────────
+  const handlePeek = useCallback(() => {
+    const s = S.current;
+    if (peekActive) {
+      // Toggle off
+      setPeekActive(false);
+      setHighlightedMidi([]);
+      return;
+    }
+    if (!s.parsedMusic || s.phase !== 'playing') return;
+    const col = s.parsedMusic.columns[s.currentColIdx];
+    if (!col) return;
+    setHighlightedMidi(col.allMidi);
+    setPeekActive(true);
+    setHintsUsed(h => h + 1);
+  }, [peekActive, setHighlightedMidi]);
 
   // ── Skip to next column ───────────────────────────────────────────────────
   const skipToNext = useCallback(() => {
@@ -278,14 +412,59 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     setCurrentColIdx(prev => Math.min(prev + 1, totalCols));
     setFeedback(null);
     setTimingInfo(null);
-  }, [totalCols]);
+    setPeekActive(false);
+    setHighlightedMidi([]);
+  }, [totalCols, setHighlightedMidi]);
+
+  // ── Preview playback ──────────────────────────────────────────────────────
+  const stopPreview = useCallback(() => {
+    previewTimersRef.current.forEach(t => clearTimeout(t));
+    previewTimersRef.current = [];
+    setPreviewPlaying(false);
+  }, []);
+
+  const playPreview = useCallback(() => {
+    if (!parsedMusic) return;
+    if (previewPlaying) { stopPreview(); return; }
+
+    const cols = parsedMusic.columns.slice(practiceStartCol, practiceEndCol);
+    if (!cols.length) return;
+
+    setPreviewPlaying(true);
+    const beatMs = (60 / effectiveBpm) * 1000;
+    const startBeat = cols[0].globalBeatPos;
+    const timers = [];
+
+    cols.forEach((col, i) => {
+      if (!col.allMidi.length) return;
+      const timeMs = (col.globalBeatPos - startBeat) * beatMs;
+      const nextBeat = i + 1 < cols.length ? cols[i + 1].globalBeatPos : col.globalBeatPos + 1;
+      const noteDurSec = Math.min((nextBeat - col.globalBeatPos) * beatMs / 1000 * 0.85, 1.2);
+      timers.push(setTimeout(() => {
+        col.allMidi.forEach(m => playNote(m, 0.5, Math.max(noteDurSec, 0.12)));
+      }, timeMs));
+    });
+
+    const totalMs = (cols.at(-1).globalBeatPos - startBeat + 1) * beatMs;
+    timers.push(setTimeout(() => {
+      setPreviewPlaying(false);
+      previewTimersRef.current = [];
+    }, totalMs + 150));
+
+    previewTimersRef.current = timers;
+  }, [parsedMusic, practiceStartCol, practiceEndCol, effectiveBpm, previewPlaying, playNote, stopPreview]);
 
   // ── Start practice with count-in ──────────────────────────────────────────
   const startPractice = useCallback(() => {
+    stopPreview();
     isAdvancing.current = false;
-    setCurrentColIdx(0);
+    setCurrentColIdx(practiceStartCol);
     setFeedback(null);
     setTimingInfo(null);
+    setPeekActive(false);
+    setHintsUsed(0);
+    setHighlightedMidi([]);
+    setNotePopup(null);
     setPhase('countIn');
     const fresh = { at: 0, co: 0 };
     sessionRef.current = fresh;
@@ -299,7 +478,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
         setPhase('playing');
       },
     });
-  }, [metro, beatsPerMeasure]);
+  }, [metro, beatsPerMeasure, practiceStartCol]);
 
   // ── Note-on handler — Active Set pattern ─────────────────────────────────
   const handleNoteOn = useCallback((midi) => {
@@ -367,7 +546,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
 
     if (!required.includes(midi)) {
       required.forEach(n => {
-        playNoteRef.current(n, 0.2);
+        if (s.noteSoundEnabled) playNoteRef.current(n, 0.2);
         recordNoteMissRef.current(n);
       });
       setFeedback('incorrect');
@@ -385,7 +564,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     const allHeld = required.every(m => held.includes(m));
 
     if (allHeld) {
-      required.forEach(n => playNoteRef.current(n));
+      if (s.noteSoundEnabled) required.forEach(n => playNoteRef.current(n));
       isAdvancing.current = true;
       setFeedback('correct');
       setTimingInfo(tInfo);
@@ -399,6 +578,11 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
         isAdvancing.current = false;
         setCurrentColIdx(prev => prev + 1);
         setFeedback(null);
+        // Clear peek once the note is played — its job is done
+        if (S.current.peekActive) {
+          setPeekActive(false);
+          setHighlightedMidi([]);
+        }
       }, 80);
       timingTimeout.current = setTimeout(() => setTimingInfo(null), 1200);
     }
@@ -410,6 +594,9 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     return () => registerModeHandler(null);
   }, [handleNoteOn, registerModeHandler]);
 
+  // Stop preview on unmount
+  useEffect(() => () => stopPreview(), []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!isPlaying) {
       metro.stop();
@@ -418,20 +605,27 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
       isAdvancing.current = false;
       clearTimeout(feedbackTimeout.current);
       clearTimeout(timingTimeout.current);
+      setPeekActive(false);
+      setHintsUsed(0);
+      setHighlightedMidi([]);
+      setNotePopup(null);
       setPhase('idle');
     }
   }, [isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Piece complete ─────────────────────────────────────────────────────────
   useEffect(() => {
-    if (currentColIdx >= totalCols && totalCols > 0 && phase === 'playing') {
+    if (currentColIdx >= practiceEndCol && practiceEndCol > 0 && phase === 'playing') {
       metro.stop();
       setPhase('done');
     }
-  }, [currentColIdx, totalCols, phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentColIdx, practiceEndCol, phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived UI ─────────────────────────────────────────────────────────────
-  const progress   = totalCols > 0 ? (currentColIdx / totalCols) * 100 : 0;
+  const practiceRange = practiceEndCol - practiceStartCol;
+  const progress = practiceRange > 0
+    ? Math.max(0, Math.min(100, ((currentColIdx - practiceStartCol) / practiceRange) * 100))
+    : 0;
   const { at, co } = session;
   const acc        = at > 0 ? Math.round((co / at) * 100) : 0;
 
@@ -523,7 +717,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
 
         {!isPlaying ? (
           // ── Start screen ─────────────────────────────────────────────────
-          <div className="start-prompt" style={{ maxWidth: 480 }}>
+          <div className="start-prompt" style={{ maxWidth: 480, width: '100%' }}>
             <div className="icon">♩</div>
             <p>
               <strong style={{ color: 'var(--accent-gold)' }}>{parsedMusic.title}</strong><br />
@@ -572,8 +766,69 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
               </span>
             </div>
 
+            {/* ── Score Overview toggle ────────────────── */}
+            <button
+              className="piece-library-toggle"
+              onClick={() => setShowOverview(v => !v)}
+              style={{ width: 'auto', padding: '5px 14px' }}
+            >
+              Score Overview {showOverview ? '▲' : '▼'}
+            </button>
+            {showOverview && (
+              <div className="score-overview-container">
+                <ScoreOverview
+                  parsedMusic={parsedMusic}
+                  startMeasure={practiceStartMeasure}
+                  endMeasure={practiceEndMeasure}
+                  onSelectMeasure={(mIdx) => {
+                    if (mIdx < practiceStartMeasure) {
+                      setPracticeStartMeasure(mIdx);
+                    } else if (mIdx > practiceEndMeasure) {
+                      setPracticeEndMeasure(mIdx);
+                    } else if (mIdx === practiceStartMeasure && mIdx === practiceEndMeasure) {
+                      // already single — do nothing
+                    } else {
+                      // inside range — collapse to single measure
+                      setPracticeStartMeasure(mIdx);
+                      setPracticeEndMeasure(mIdx);
+                    }
+                  }}
+                />
+              </div>
+            )}
+
+            {/* ── Practice range controls ──────────────── */}
+            <div className="range-row">
+              <span className="setting-label">Practice</span>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>M</span>
+              <button className="range-btn" onClick={() => setPracticeStartMeasure(m => Math.max(0, m - 1))} title="Earlier start">‹</button>
+              <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 13, color: 'var(--accent-gold)', minWidth: 20, textAlign: 'center' }}>
+                {practiceStartMeasure + 1}
+              </span>
+              <button className="range-btn" onClick={() => setPracticeStartMeasure(m => Math.min(practiceEndMeasure, m + 1))} title="Later start">›</button>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 4px' }}>to M</span>
+              <button className="range-btn" onClick={() => setPracticeEndMeasure(m => Math.max(practiceStartMeasure, m - 1))} title="Earlier end">‹</button>
+              <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 13, color: 'var(--accent-gold)', minWidth: 20, textAlign: 'center' }}>
+                {practiceEndMeasure + 1}
+              </span>
+              <button className="range-btn" onClick={() => setPracticeEndMeasure(m => Math.min((parsedMusic?.measures.length ?? 1) - 1, m + 1))} title="Later end">›</button>
+              <button
+                className="reset-btn"
+                style={{ padding: '2px 8px', fontSize: 11, marginTop: 0 }}
+                onClick={() => { setPracticeStartMeasure(0); setPracticeEndMeasure((parsedMusic?.measures.length ?? 1) - 1); }}
+              >All</button>
+            </div>
+
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
-              <button className="start-btn" onClick={onStart}>Start</button>
+              <button className="start-btn" onClick={() => { onStart(); startPractice(); }}>Start</button>
+              <button
+                className={`peek-btn${previewPlaying ? ' active' : ''}`}
+                style={{ fontSize: 13 }}
+                onClick={playPreview}
+                title={previewPlaying ? 'Stop preview' : 'Hear the selected measures'}
+              >
+                {previewPlaying ? '■ Stop' : '▶ Preview'}
+              </button>
               <button className="reset-btn" style={{ marginTop: 0 }} onClick={() => setParsedMusic(null)}>
                 Upload different file
               </button>
@@ -581,9 +836,9 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
                 <button
                   className="save-piece-btn"
                   onClick={handleSave}
-                  disabled={saving}
+                  disabled={saving || !!alreadySavedId}
                 >
-                  {saving ? 'Saving…' : '+ Save to Library'}
+                  {saving ? 'Saving…' : alreadySavedId ? 'Saved ✓' : '+ Save to Library'}
                 </button>
               )}
             </div>
@@ -603,33 +858,44 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
 
             {/* ── Staff ────────────────────────────────────────────────── */}
             {(phase === 'playing' || phase === 'done') && (
-              <StaffDisplay
-                trebleMeasureNotes={trebleAnnotated}
-                bassMeasureNotes={bassAnnotated}
-                grandStaff={true}
-                clef="treble"
-                mode="sheet"
-                timeSignature={parsedMusic.timeSignature}
-                showNoteNames={showNoteNames}
-                dimTreble={handMode === 'lh'}
-                dimBass={handMode === 'rh'}
-              />
+              <>
+                <StaffDisplay
+                  trebleMeasureNotes={trebleAnnotated}
+                  bassMeasureNotes={bassAnnotated}
+                  grandStaff={true}
+                  clef="treble"
+                  mode="sheet"
+                  timeSignature={parsedMusic.timeSignature}
+                  showNoteNames={showNoteNames}
+                  dimTreble={handMode === 'lh'}
+                  dimBass={handMode === 'rh'}
+                  onNoteClick={handleNoteClickInStaff}
+                />
+                {notePopup && (
+                  <div className="note-popup">
+                    <span className="note-popup-name">{notePopup.midis.map(m => midiToDisplayName(m)).join(' + ')}</span>
+                    {notePopup.ornament && (
+                      <span className="note-popup-ornament">
+                        — {getOrnamentDescription(notePopup.ornament, notePopup.midis)}
+                      </span>
+                    )}
+                    <button className="note-popup-close" onClick={() => { setNotePopup(null); setHighlightedMidi([]); }}>×</button>
+                  </div>
+                )}
+              </>
             )}
 
             {/* ── Current step info ────────────────────────────────────── */}
             {phase === 'playing' && currentColIdx < totalCols && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                <div className={`note-name-display${feedback ? ` ${feedback}` : ''}`}>
-                  {stepLabel()}
-                </div>
-                {/* Per-hand breakdown */}
-                {handNames && (
+                {/* RH + LH labels — only shown when peek is active */}
+                {peekActive && handNames && (
                   <div className="hand-names-row">
                     <span className="hand-label rh">RH: {handNames.rh}</span>
                     <span className="hand-label lh">LH: {handNames.lh}</span>
                   </div>
                 )}
-                {/* Timing feedback */}
+                {/* Timing feedback — always shown */}
                 {timingInfo && (
                   <div className={`timing-label ${timingInfo.cls}`}>{timingInfo.label}</div>
                 )}
@@ -645,17 +911,29 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
             {/* ── Metronome + beat indicator (during play) ─────────────── */}
             {(phase === 'playing' || phase === 'countIn') && (
               <div className="sheet-metro-bar">
-                <BeatIndicator
-                  currentBeat={metro.currentBeat}
-                  countInBeat={metro.countInBeat}
-                  countingIn={metro.countingIn}
-                  beatsPerMeasure={beatsPerMeasure}
-                  subdivision={subdivision}
-                  currentSubBeat={metro.currentSubBeat}
-                />
+                {metronomeEnabled && (
+                  <BeatIndicator
+                    currentBeat={metro.currentBeat}
+                    countInBeat={metro.countInBeat}
+                    countingIn={metro.countingIn}
+                    beatsPerMeasure={beatsPerMeasure}
+                    subdivision={subdivision}
+                    currentSubBeat={metro.currentSubBeat}
+                  />
+                )}
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                   <div className="bpm-display">{effectiveBpm}</div>
                   <div className="bpm-label">{practiceSpeed < 1 ? `${practiceSpeed * 100}%` : 'BPM'}</div>
+                </div>
+                <div style={{ width: 1, height: 32, background: 'var(--border)' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                  <div className="bpm-display" style={{ fontSize: 15 }}>
+                    {currentMeasureIdx - practiceStartMeasure + 1}
+                    <span style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'DM Sans,sans-serif' }}>
+                      /{practiceEndMeasure - practiceStartMeasure + 1}
+                    </span>
+                  </div>
+                  <div className="bpm-label">Measure</div>
                 </div>
                 {/* Subdivision selector */}
                 <div className="subdivision-selector">
@@ -685,6 +963,13 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
               <button className="reset-btn" onClick={() => { metro.stop(); isAdvancing.current = false; clearTimeout(feedbackTimeout.current); clearTimeout(timingTimeout.current); setCurrentColIdx(0); setFeedback(null); setPhase('idle'); setParsedMusic(null); }}>
                 New File
               </button>
+              <button
+                className={`peek-btn${peekActive ? ' active' : ''}`}
+                onClick={handlePeek}
+                title={peekActive ? 'Cancel peek' : `Show next note on keyboard (${hintsUsed} used)`}
+              >
+                {peekActive ? '★ Peek' : '☆ Peek'}
+              </button>
             </div>
           </div>
         )}
@@ -696,7 +981,10 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
           <div className="sheet-progress-fill" style={{ width: `${progress}%` }} />
         </div>
         <div className="sheet-progress-label">
-          Beat {Math.min(currentColIdx + 1, totalCols)} of {totalCols} — Measure {currentMeasureIdx + 1} — {acc}% accuracy
+          Beat {Math.min(currentColIdx - practiceStartCol + 1, practiceRange)} of {practiceRange} — Measure {currentMeasureIdx + 1}
+          {practiceStartMeasure > 0 || practiceEndMeasure < (parsedMusic?.measures.length ?? 1) - 1
+            ? ` (M${practiceStartMeasure + 1}–M${practiceEndMeasure + 1})`
+            : ''} — {acc}% accuracy
         </div>
       </div>
 

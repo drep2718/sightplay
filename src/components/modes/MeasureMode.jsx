@@ -20,7 +20,7 @@ function getTimingLabel(timingErrorMs) {
 }
 
 export default function MeasureMode({ isPlaying, onStart, onStop, registerModeHandler }) {
-  const { clef, tier, accidentals, bpm, timeSig, metroVolume, showNoteNames, recordNoteMiss } = useStore();
+  const { clef, tier, accidentals, bpm, timeSig, metroVolume, metronomeEnabled, noteSoundEnabled, showNoteNames, recordNoteMiss } = useStore();
   const { playNote } = useAudioSynth();
 
   const [currentMeasure, setCurrentMeasure] = useState(null);
@@ -40,14 +40,14 @@ export default function MeasureMode({ isPlaying, onStart, onStop, registerModeHa
 
   const beats = parseInt(timeSig.split('/')[0]) || 4;
 
-  const metro = useMetronome({ bpm, beatsPerMeasure: beats, subdivision, volume: metroVolume });
+  const metro = useMetronome({ bpm, beatsPerMeasure: beats, subdivision, volume: metronomeEnabled ? metroVolume : 0 });
 
   const playNoteRef = useRef(playNote);
   playNoteRef.current = playNote;
 
   // Snapshot of mutable state accessible inside callbacks without re-creating them
   const S = useRef({});
-  S.current = { clef, tier, accidentals, bpm, timeSig, currentMeasure, measureIndex, activeClef, isPlaying, phase };
+  S.current = { clef, tier, accidentals, bpm, timeSig, currentMeasure, measureIndex, activeClef, isPlaying, phase, noteSoundEnabled };
 
   const recordNoteMissRef = useRef(recordNoteMiss);
   recordNoteMissRef.current = recordNoteMiss;
@@ -122,7 +122,7 @@ export default function MeasureMode({ isPlaying, onStart, onStop, registerModeHa
     }
 
     if (ok) {
-      playNoteRef.current(s.currentMeasure[s.measureIndex].midi);
+      if (s.noteSoundEnabled) playNoteRef.current(s.currentMeasure[s.measureIndex].midi);
       setCurrentMeasure(prev => {
         const next = [...prev];
         next[s.measureIndex] = { ...next[s.measureIndex], played: true };
@@ -144,7 +144,7 @@ export default function MeasureMode({ isPlaying, onStart, onStop, registerModeHa
         setMeasureIndex(s.measureIndex + 1);
       }
     } else {
-      playNoteRef.current(s.currentMeasure[s.measureIndex].midi, 0.2);
+      if (s.noteSoundEnabled) playNoteRef.current(s.currentMeasure[s.measureIndex].midi, 0.2);
       recordNoteMissRef.current(s.currentMeasure[s.measureIndex].midi);
       setCurrentMeasure(prev => {
         const next = [...prev];
@@ -255,14 +255,16 @@ export default function MeasureMode({ isPlaying, onStart, onStop, registerModeHa
             {metro.running ? '⏸' : '▶'}
           </button>
 
-          <BeatIndicator
-            currentBeat={metro.currentBeat}
-            countInBeat={metro.countInBeat}
-            countingIn={metro.countingIn}
-            beatsPerMeasure={beats}
-            subdivision={subdivision}
-            currentSubBeat={metro.currentSubBeat}
-          />
+          {metronomeEnabled && (
+            <BeatIndicator
+              currentBeat={metro.currentBeat}
+              countInBeat={metro.countInBeat}
+              countingIn={metro.countingIn}
+              beatsPerMeasure={beats}
+              subdivision={subdivision}
+              currentSubBeat={metro.currentSubBeat}
+            />
+          )}
 
           <div className="metronome-display">
             <div>

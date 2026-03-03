@@ -31,6 +31,7 @@ function MainApp() {
     addPressedKey, removePressedKey, updateDetectedRange,
     resetSession, loadUserData,
     noteMissCounts, showNoteNames,
+    highlightedMidi,
   } = useStore();
 
   const { user } = useAuth();
@@ -134,7 +135,7 @@ function MainApp() {
         {showKeyboard && (
           <KeyboardViz
             pressedKeys={pressedKeys}
-            targetKeys={[]}
+            targetKeys={highlightedMidi}
             midiLow={kbRange.lo}
             midiHigh={kbRange.hi}
             heatmapData={Object.keys(noteMissCounts).length > 0 ? noteMissCounts : null}

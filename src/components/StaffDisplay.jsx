@@ -8,6 +8,7 @@ import {
   Accidental,
   Annotation,
   StaveConnector,
+  Ornament,
 } from 'vexflow';
 import { getVexNoteInfo, midiToDisplayName } from '../utils/noteUtils.js';
 
@@ -65,9 +66,9 @@ function styleSvg(svg, vfW, vfH) {
 
 /**
  * Build a VexFlow StaveNote from a list of MIDI numbers.
- * Applies feedback color if provided.
+ * Applies feedback color and ornament if provided.
  */
-function buildStaveNote({ midis, duration, clef, color }) {
+function buildStaveNote({ midis, duration, clef, color, ornament }) {
   const infos = midis.map(getVexNoteInfo);
   const sn = new StaveNote({
     keys: infos.map(i => i.key),
@@ -77,6 +78,16 @@ function buildStaveNote({ midis, duration, clef, color }) {
   infos.forEach((info, idx) => {
     if (info.accidental) sn.addModifier(new Accidental(info.accidental), idx);
   });
+  if (ornament) {
+    const ornName = ornament === 'trill'            ? 'tr'
+                  : ornament === 'turn'             ? 'turn'
+                  : ornament === 'mordent'          ? 'mordent'
+                  : ornament === 'inverted-mordent' ? 'mordentInverted'
+                  : null;
+    if (ornName) {
+      try { sn.addModifier(new Ornament(ornName)); } catch { /* ignore unsupported ornaments */ }
+    }
+  }
   if (color) sn.setStyle({ fillStyle: color, strokeStyle: color });
   return sn;
 }
@@ -84,9 +95,9 @@ function buildStaveNote({ midis, duration, clef, color }) {
 /**
  * @param {{
  *   notes?: number[],
- *   measureNotes?: Array<{ midi: number, duration: string, played?: boolean|null, current?: boolean }>,
- *   trebleMeasureNotes?: Array<{ midi: number, duration: string, played?: boolean|null, current?: boolean }>,
- *   bassMeasureNotes?: Array<{ midi: number, duration: string, played?: boolean|null, current?: boolean }>,
+ *   measureNotes?: Array<{ midi: number, duration: string, played?: boolean|null, current?: boolean, ornament?: string|null }>,
+ *   trebleMeasureNotes?: Array<{ midi: number, duration: string, played?: boolean|null, current?: boolean, ornament?: string|null }>,
+ *   bassMeasureNotes?: Array<{ midi: number, duration: string, played?: boolean|null, current?: boolean, ornament?: string|null }>,
  *   clef?: string,
  *   activeClef?: string,
  *   feedback?: 'correct'|'incorrect'|null,
@@ -96,6 +107,7 @@ function buildStaveNote({ midis, duration, clef, color }) {
  *   showNoteNames?: boolean,
  *   dimTreble?: boolean,
  *   dimBass?: boolean,
+ *   onNoteClick?: (colIdx: number, midis: number[], ornament: string|null) => void,
  * }} props
  */
 export default function StaffDisplay({
@@ -112,8 +124,12 @@ export default function StaffDisplay({
   showNoteNames,
   dimTreble,
   dimBass,
+  onNoteClick,
 }) {
-  const containerRef = useRef(null);
+  const containerRef   = useRef(null);
+  // Keep the callback in a ref so changing it doesn't trigger SVG rebuild
+  const onNoteClickRef = useRef(onNoteClick);
+  onNoteClickRef.current = onNoteClick;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -130,6 +146,8 @@ export default function StaffDisplay({
     const stX  = isGrand ? 40 : 10;
     const stW  = vfW - stX - 10;
     const noteClef = activeClef || (clef === 'both' ? 'treble' : clef) || 'treble';
+
+    let trebleHits = [], bassHits = [], singleHits = [];
 
     try {
       const renderer = new Renderer(el, Renderer.Backends.SVG);
@@ -155,27 +173,52 @@ export default function StaffDisplay({
           .setType(StaveConnector.type.SINGLE_RIGHT).setContext(ctx).draw();
 
         if (hasBothHands) {
-          // Render notes on respective staves
-          renderNotes(ctx, trebleStave, 'treble', stW, true, trebleMeasureNotes, null, null, timeSignature, showNoteNames, dimTreble);
-          renderNotes(ctx, bassStave,   'bass',   stW, true, bassMeasureNotes,   null, null, timeSignature, showNoteNames, dimBass);
+          trebleHits = renderNotes(ctx, trebleStave, 'treble', stW, true, trebleMeasureNotes, null, null, timeSignature, showNoteNames, dimTreble);
+          bassHits   = renderNotes(ctx, bassStave,   'bass',   stW, true, bassMeasureNotes,   null, null, timeSignature, showNoteNames, dimBass);
         } else {
-          // Single hand — original behaviour
           const noteStave = noteClef === 'treble' ? trebleStave : bassStave;
-          renderNotes(ctx, noteStave, noteClef, stW, isMeasureMode, measureNotes, notes, feedback, timeSignature, showNoteNames, false);
+          singleHits = renderNotes(ctx, noteStave, noteClef, stW, isMeasureMode, measureNotes, notes, feedback, timeSignature, showNoteNames, false);
         }
       } else {
         const stave = new Stave(stX, 20, stW);
         stave.addClef(noteClef);
         if (isMeasureMode && timeSignature) stave.addTimeSignature(timeSignature);
         stave.setContext(ctx).draw();
-        renderNotes(ctx, stave, noteClef, stW, isMeasureMode, measureNotes, notes, feedback, timeSignature, showNoteNames, false);
+        singleHits = renderNotes(ctx, stave, noteClef, stW, isMeasureMode, measureNotes, notes, feedback, timeSignature, showNoteNames, false);
       }
 
       const svg = el.querySelector('svg');
-      if (svg) styleSvg(svg, vfW, vfH);
+      if (svg) {
+        styleSvg(svg, vfW, vfH);
+
+        // Always attach listener; read callback from ref so this effect
+        // doesn't need to re-run (and rebuild the SVG) when the callback changes.
+        if (onNoteClickRef.current) svg.style.cursor = 'pointer';
+        svg.addEventListener('click', (e) => {
+          if (!onNoteClickRef.current) return;
+          const rect = svg.getBoundingClientRect();
+          const svgX = ((e.clientX - rect.left) / rect.width) * vfW;
+          const svgY = ((e.clientY - rect.top) / rect.height) * vfH;
+
+          const hits = isGrand
+            ? (svgY > vfH / 2 ? bassHits : trebleHits)
+            : singleHits;
+
+          let closest = null, minDist = Infinity;
+          hits.forEach(a => {
+            const d = Math.abs(svgX - a.x);
+            if (d < minDist) { minDist = d; closest = a; }
+          });
+          if (closest && minDist < 50) {
+            onNoteClickRef.current(closest.colIdx, closest.midis, closest.ornament ?? null);
+          }
+        });
+      }
     } catch (err) {
       console.warn('VexFlow render error:', err);
     }
+  // onNoteClick intentionally excluded — kept in ref to avoid SVG rebuilds
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notes, measureNotes, trebleMeasureNotes, bassMeasureNotes, clef, activeClef, feedback, mode, timeSignature, grandStaff, showNoteNames, dimTreble, dimBass]);
 
   return <div ref={containerRef} className="staff-container" />;
@@ -190,17 +233,21 @@ function addNoteNameAnnotation(sn, midi) {
   } catch { /* ignore annotation errors */ }
 }
 
+/**
+ * Renders notes onto a stave and returns an array of hit areas for click detection.
+ * @returns {{ x: number, colIdx: number, midis: number[], ornament: string|null }[]}
+ */
 function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, notes, feedback, timeSignature, showNoteNames, dim) {
   const noteColor = feedback === 'correct'   ? '#4ade80'
                   : feedback === 'incorrect' ? '#f87171'
                   : '#e8e4df';
 
   const applyDim = dim ? { opacity: 0.35 } : null;
+  const hitAreas = [];
 
   if (isMeasureMode && measureNotes?.length) {
-    const vfNotes = measureNotes.map(n => {
+    const vfNotes = measureNotes.map((n, i) => {
       if (n.isRest) {
-        // Invisible ghost rest — keeps the voice in sync with the other stave
         const restKey = clef === 'bass' ? 'd/3' : 'b/4';
         const sn = new StaveNote({ keys: [restKey], duration: n.duration + 'r', clef });
         sn.setStyle({ fillStyle: 'transparent', strokeStyle: 'transparent' });
@@ -210,12 +257,12 @@ function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, 
                   : n.played === false ? '#f87171'
                   : n.current         ? '#d4a853'
                   : '#e8e4df';
-      const sn = buildStaveNote({ midis: Array.isArray(n.midi) ? n.midi : [n.midi], duration: n.duration, clef, color });
-      if (showNoteNames) addNoteNameAnnotation(sn, Array.isArray(n.midi) ? n.midi[0] : n.midi);
+      const midis = Array.isArray(n.midi) ? n.midi : [n.midi];
+      const sn = buildStaveNote({ midis, duration: n.duration, clef, color, ornament: n.ornament ?? null });
+      if (showNoteNames) addNoteNameAnnotation(sn, midis[0]);
       return sn;
     });
 
-    // Sum total ticks for Voice
     const totalTicks = measureNotes.reduce(
       (sum, n) => sum + (n.duration === 'q' ? 4096 : n.duration === '8' ? 2048 : n.duration === 'h' ? 8192 : n.duration === 'w' ? 16384 : 4096),
       0
@@ -233,7 +280,22 @@ function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, 
     } else {
       voice.draw(ctx, stave);
     }
-    return;
+
+    // Build hit areas after formatting (positions are set after format+draw)
+    vfNotes.forEach((sn, i) => {
+      if (measureNotes[i].isRest) return;
+      const midis = Array.isArray(measureNotes[i].midi) ? measureNotes[i].midi : [measureNotes[i].midi];
+      try {
+        hitAreas.push({
+          x: sn.getX(),
+          colIdx: i,
+          midis,
+          ornament: measureNotes[i].ornament ?? null,
+        });
+      } catch { /* ignore */ }
+    });
+
+    return hitAreas;
   }
 
   if (notes?.length) {
@@ -245,4 +307,6 @@ function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, 
     new Formatter().joinVoices([voice]).format([voice], staveWidth - 80);
     voice.draw(ctx, stave);
   }
+
+  return hitAreas;
 }

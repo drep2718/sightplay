@@ -20,7 +20,7 @@ function buildFinalStats(session) {
 }
 
 export default function FlashMode({ isPlaying, onStart, onStop, registerModeHandler }) {
-  const { clef, tier, accidentals, recordAttempt, recordNoteMiss, showNoteNames } = useStore();
+  const { clef, tier, accidentals, recordAttempt, recordNoteMiss, showNoteNames, noteSoundEnabled } = useStore();
   const pressedKeys = useStore(s => s.pressedKeys);
   const { playNote } = useAudioSynth();
 
@@ -33,7 +33,7 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
 
   // Keep volatile state in a ref so the handler never goes stale
   const S = useRef({});
-  S.current = { clef, tier, accidentals, currentNote, activeClef, isPlaying, session };
+  S.current = { clef, tier, accidentals, currentNote, activeClef, isPlaying, session, noteSoundEnabled };
 
   const playNoteRef = useRef(playNote);
   playNoteRef.current = playNote;
@@ -98,7 +98,7 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
       const wrongNote = !s.currentNote.includes(midi);
 
       if (allHeld) {
-        s.currentNote.forEach(n => playNoteRef.current(n));
+        if (s.noteSoundEnabled) s.currentNote.forEach(n => playNoteRef.current(n));
         setFeedback('correct');
         setSession(p => { const n = { at: p.at + 1, co: p.co + 1, rt: rt ? [...p.rt, rt] : p.rt }; sessionRef.current = n; return n; });
         setHistory(h => [...h.slice(-49), true]);
@@ -106,7 +106,7 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
         clearFeedbackTimer();
         feedbackTimeout.current = setTimeout(nextNote, 500);
       } else if (wrongNote) {
-        s.currentNote.forEach(n => playNoteRef.current(n, 0.2));
+        if (s.noteSoundEnabled) s.currentNote.forEach(n => playNoteRef.current(n, 0.2));
         s.currentNote.forEach(n => recordNoteMiss(n));
         setFeedback('incorrect');
         setSession(p => { const n = { ...p, at: p.at + 1 }; sessionRef.current = n; return n; });
@@ -118,9 +118,9 @@ export default function FlashMode({ isPlaying, onStart, onStop, registerModeHand
     } else {
       const ok = midi === s.currentNote[0];
       if (ok) {
-        playNoteRef.current(s.currentNote[0]);
+        if (s.noteSoundEnabled) playNoteRef.current(s.currentNote[0]);
       } else {
-        playNoteRef.current(s.currentNote[0], 0.2);
+        if (s.noteSoundEnabled) playNoteRef.current(s.currentNote[0], 0.2);
         recordNoteMiss(s.currentNote[0]);
       }
       setFeedback(ok ? 'correct' : 'incorrect');
