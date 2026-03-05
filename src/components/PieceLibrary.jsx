@@ -9,9 +9,11 @@ import { api } from '../hooks/useApi.js';
  *   onRefresh — () => void        — called to reload the list from the store
  */
 export default function PieceLibrary({ pieces, onLoad, onRefresh }) {
-  const [open,    setOpen]    = useState(false);
-  const [loading, setLoading] = useState(null); // piece id being loaded
-  const [toast,   setToast]   = useState(null); // { msg, ok }
+  const [open,      setOpen]      = useState(false);
+  const [loading,   setLoading]   = useState(null); // piece id being loaded
+  const [toast,     setToast]     = useState(null); // { msg, ok }
+  const [renaming,  setRenaming]  = useState(null); // piece id in rename mode
+  const [renameVal, setRenameVal] = useState('');
 
   function showToast(msg, ok = true) {
     setToast({ msg, ok });
@@ -37,6 +39,26 @@ export default function PieceLibrary({ pieces, onLoad, onRefresh }) {
       await api.patch(`/pieces/${piece.id}/favorite`);
       onRefresh();
     } catch { /* ignore */ }
+  }
+
+  function startRename(e, piece) {
+    e.stopPropagation();
+    setRenaming(piece.id);
+    setRenameVal(piece.title);
+  }
+
+  async function commitRename(piece) {
+    const trimmed = renameVal.trim();
+    if (!trimmed || trimmed === piece.title) { setRenaming(null); return; }
+    try {
+      await api.patch(`/pieces/${piece.id}/rename`, { title: trimmed });
+      showToast('Renamed');
+      onRefresh();
+    } catch {
+      showToast('Failed to rename', false);
+    } finally {
+      setRenaming(null);
+    }
   }
 
   async function handleDelete(e, piece) {
@@ -69,7 +91,22 @@ export default function PieceLibrary({ pieces, onLoad, onRefresh }) {
               onClick={() => handleLoad(p)}
               title={loading === p.id ? 'Loading…' : `Load "${p.title}"`}
             >
-              <div className="piece-card-title">{p.title}</div>
+              {renaming === p.id ? (
+                <input
+                  className="piece-rename-input"
+                  value={renameVal}
+                  autoFocus
+                  onClick={e => e.stopPropagation()}
+                  onChange={e => setRenameVal(e.target.value)}
+                  onBlur={() => commitRename(p)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.currentTarget.blur(); }
+                    if (e.key === 'Escape') { setRenaming(null); }
+                  }}
+                />
+              ) : (
+                <div className="piece-card-title">{p.title}</div>
+              )}
               <div className="piece-card-meta">
                 <span className="format-tag">{p.file_type}</span>
                 {p.tempo && <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{p.tempo} BPM</span>}
@@ -85,6 +122,13 @@ export default function PieceLibrary({ pieces, onLoad, onRefresh }) {
                   title={p.is_favorite ? 'Unfavorite' : 'Favorite'}
                 >
                   {p.is_favorite ? '★' : '☆'}
+                </button>
+                <button
+                  className="piece-rename-btn"
+                  onClick={e => startRename(e, p)}
+                  title="Rename"
+                >
+                  ✎
                 </button>
                 <button
                   className="piece-del-btn"

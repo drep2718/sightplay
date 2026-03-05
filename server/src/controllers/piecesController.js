@@ -44,4 +44,11 @@ async function played(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { list, save, getContent, favorite, remove, played };
+async function rename(req, res, next) {
+  try {
+    const result = await svc.renamePiece(req.user.id, req.params.id, req.body.title);
+    res.json(result);
+  } catch (err) { next(err); }
+}
+
+module.exports = { list, save, getContent, favorite, rename, remove, played };

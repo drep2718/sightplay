@@ -5,6 +5,7 @@ import {
   StaveNote,
   Voice,
   Formatter,
+  Beam,
   Accidental,
   Annotation,
   StaveConnector,
@@ -74,6 +75,7 @@ function buildStaveNote({ midis, duration, clef, color, ornament }) {
     keys: infos.map(i => i.key),
     duration,
     clef: clef || 'treble',
+    auto_stem: true,
   });
   infos.forEach((info, idx) => {
     if (info.accidental) sn.addModifier(new Accidental(info.accidental), idx);
@@ -249,7 +251,7 @@ function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, 
     const vfNotes = measureNotes.map((n, i) => {
       if (n.isRest) {
         const restKey = clef === 'bass' ? 'd/3' : 'b/4';
-        const sn = new StaveNote({ keys: [restKey], duration: n.duration + 'r', clef });
+        const sn = new StaveNote({ keys: [restKey], duration: n.duration + 'r', clef, auto_stem: true });
         sn.setStyle({ fillStyle: 'transparent', strokeStyle: 'transparent' });
         return sn;
       }
@@ -263,8 +265,9 @@ function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, 
       return sn;
     });
 
+    const DURATION_TICKS = { w: 16384, h: 8192, q: 4096, '8': 2048, '16': 1024, '32': 512 };
     const totalTicks = measureNotes.reduce(
-      (sum, n) => sum + (n.duration === 'q' ? 4096 : n.duration === '8' ? 2048 : n.duration === 'h' ? 8192 : n.duration === 'w' ? 16384 : 4096),
+      (sum, n) => sum + (DURATION_TICKS[n.duration] ?? 4096),
       0
     );
     const voice = new Voice({ num_beats: totalTicks / 4096, beat_value: 4 });
@@ -272,13 +275,57 @@ function renderNotes(ctx, stave, clef, staveWidth, isMeasureMode, measureNotes, 
     voice.addTickables(vfNotes);
     new Formatter().joinVoices([voice]).format([voice], staveWidth - 80);
 
+    // Beam groups: break at musically correct boundaries AND use Beam(group, true)
+    // so VexFlow computes one stem direction for the whole group (fixing the
+    // mixed-auto-stem bug that caused generateBeams to split runs into pairs).
+    //
+    // Group size rule:
+    //   Even-beat meters (2/4, 4/4, 6/8, 12/8): beam within the half-measure
+    //   Odd-beat meters  (3/4, 9/8):             beam within the full measure
+    const [tsNum, tsDen] = (timeSignature || '4/4').split('/').map(Number);
+    const beatTicks  = (4096 * 4) / tsDen;
+    const groupTicks = tsNum % 2 === 0
+      ? (tsNum / 2) * beatTicks   // half-measure
+      : tsNum       * beatTicks;  // full measure
+
+    const beams = [];
+    let beamGroup    = [];
+    let tickPos      = 0;
+    let windowEnd    = groupTicks;
+
+    for (let i = 0; i < vfNotes.length; i++) {
+      const dur      = measureNotes[i].duration;
+      const noteTicks = DURATION_TICKS[dur] ?? 4096;
+      const isBeamable = !measureNotes[i].isRest && (dur === '8' || dur === '16' || dur === '32');
+
+      // Crossed into a new beam-group window → flush current group
+      if (tickPos >= windowEnd) {
+        if (beamGroup.length >= 2) beams.push(new Beam(beamGroup, true));
+        beamGroup = [];
+        while (tickPos >= windowEnd) windowEnd += groupTicks;
+      }
+
+      if (isBeamable) {
+        beamGroup.push(vfNotes[i]);
+      } else {
+        // Non-beamable note (quarter, half, etc.) breaks the current group
+        if (beamGroup.length >= 2) beams.push(new Beam(beamGroup, true));
+        beamGroup = [];
+      }
+
+      tickPos += noteTicks;
+    }
+    if (beamGroup.length >= 2) beams.push(new Beam(beamGroup, true));
+
     if (applyDim) {
       const grp = ctx.openGroup('dim-staff');
       voice.draw(ctx, stave);
+      beams.forEach(b => b.setContext(ctx).draw());
       ctx.closeGroup();
       if (grp) grp.setAttribute('opacity', '0.35');
     } else {
       voice.draw(ctx, stave);
+      beams.forEach(b => b.setContext(ctx).draw());
     }
 
     // Build hit areas after formatting (positions are set after format+draw)

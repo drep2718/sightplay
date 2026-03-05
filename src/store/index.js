@@ -46,6 +46,8 @@ export const useStore = create((set, get) => ({
   metroVolume:    1,
   metronomeEnabled: true,
   noteSoundEnabled: true,
+  skipCountInOnRestart: false,
+  autoLoopRange: false,
 
   setMode:        (mode)    => set({ mode }),
   setClef:        (clef)    => set({ clef }),
@@ -60,6 +62,8 @@ export const useStore = create((set, get) => ({
   setMetroVolume: (v)       => set({ metroVolume: v }),
   setMetronomeEnabled: (v)  => set({ metronomeEnabled: v }),
   setNoteSoundEnabled: (v)  => set({ noteSoundEnabled: v }),
+  setSkipCountInOnRestart: (v) => set({ skipCountInOnRestart: v }),
+  setAutoLoopRange: (v)     => set({ autoLoopRange: v }),
 
   // ── Highlighted keys (for note-click in StaffDisplay) ────────────────────
   highlightedMidi: [],
@@ -109,15 +113,21 @@ export const useStore = create((set, get) => ({
       const { data: prefData } = await api.get('/users/preferences');
       const p = prefData.preferences;
       set({
-        mode:         p.mode,
-        clef:         p.clef,
-        tier:         p.tier,
-        accidentals:  p.accidentals,
-        showKeyboard: p.show_keyboard,
-        kbSize:       p.kb_size,
-        bpm:          p.bpm,
-        timeSig:      p.time_sig,
-        intervalMax:  p.interval_max,
+        mode:             p.mode,
+        clef:             p.clef,
+        tier:             p.tier,
+        accidentals:      p.accidentals,
+        showKeyboard:     p.show_keyboard,
+        kbSize:           p.kb_size,
+        bpm:              p.bpm,
+        timeSig:          p.time_sig,
+        intervalMax:      p.interval_max,
+        showNoteNames:    p.show_note_names    ?? false,
+        metroVolume:      p.metro_volume       ?? 1,
+        metronomeEnabled: p.metronome_enabled  ?? true,
+        noteSoundEnabled: p.note_sound_enabled ?? true,
+        skipCountInOnRestart: p.skip_count_in_on_restart ?? false,
+        autoLoopRange:    p.auto_loop_range    ?? false,
       });
     } catch { /* use defaults */ }
 

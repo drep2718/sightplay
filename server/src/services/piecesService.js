@@ -74,6 +74,17 @@ async function toggleFavorite(userId, pieceId) {
   return rows[0];
 }
 
+async function renamePiece(userId, pieceId, newTitle) {
+  const { rows } = await query(
+    `UPDATE pieces SET title = $3
+     WHERE id = $1 AND user_id = $2
+     RETURNING id, title`,
+    [pieceId, userId, newTitle]
+  );
+  if (!rows.length) throw Object.assign(new Error('Piece not found'), { status: 404 });
+  return rows[0];
+}
+
 async function deletePiece(userId, pieceId) {
   const { rowCount } = await query(
     'DELETE FROM pieces WHERE id = $1 AND user_id = $2',
@@ -94,4 +105,4 @@ async function markPlayed(userId, pieceId) {
   return rows[0];
 }
 
-module.exports = { listPieces, savePiece, getPieceContent, toggleFavorite, deletePiece, markPlayed };
+module.exports = { listPieces, savePiece, getPieceContent, toggleFavorite, renamePiece, deletePiece, markPlayed };

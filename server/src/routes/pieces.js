@@ -39,6 +39,14 @@ router.patch('/:id/favorite',
   ctrl.favorite
 );
 
+// PATCH /api/pieces/:id/rename
+router.patch('/:id/rename',
+  param('id').isUUID(),
+  body('title').isString().trim().notEmpty().isLength({ max: 200 }),
+  validate,
+  ctrl.rename
+);
+
 // DELETE /api/pieces/:id
 router.delete('/:id',
   param('id').isUUID(),

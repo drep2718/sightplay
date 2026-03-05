@@ -32,16 +32,22 @@ function useDebouncedPrefsSave() {
     timerRef.current = setTimeout(() => {
       const s = storeRef.current;
       api.put('/users/preferences', {
-        mode:         s.mode,
-        clef:         s.clef,
-        tier:         s.tier,
-        accidentals:  s.accidentals,
-        show_keyboard: s.showKeyboard,
-        kb_size:      s.kbSize,
-        bpm:          s.bpm,
-        time_sig:     s.timeSig,
-        interval_max: s.intervalMax,
-      }).catch(() => {}); // fire-and-forget
+        mode:               s.mode,
+        clef:               s.clef,
+        tier:               s.tier,
+        accidentals:        s.accidentals,
+        show_keyboard:      s.showKeyboard,
+        kb_size:            s.kbSize,
+        bpm:                s.bpm,
+        time_sig:           s.timeSig,
+        interval_max:       s.intervalMax,
+        show_note_names:    s.showNoteNames,
+        metro_volume:              s.metroVolume,
+        metronome_enabled:         s.metronomeEnabled,
+        note_sound_enabled:        s.noteSoundEnabled,
+        skip_count_in_on_restart:  s.skipCountInOnRestart,
+        auto_loop_range:           s.autoLoopRange,
+      }).catch(() => {});
     }, 2000);
   }, []);
 }
@@ -63,6 +69,8 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
     metroVolume, setMetroVolume,
     metronomeEnabled, setMetronomeEnabled,
     noteSoundEnabled, setNoteSoundEnabled,
+    skipCountInOnRestart, setSkipCountInOnRestart,
+    autoLoopRange, setAutoLoopRange,
     noteMissCounts, resetHeatmap,
   } = useStore();
 
@@ -249,7 +257,7 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
             <span className="setting-label">Note Names</span>
             <button
               className={`toggle-switch${showNoteNames ? ' on' : ''}`}
-              onClick={() => setShowNoteNames(!showNoteNames)}
+              onClick={() => { setShowNoteNames(!showNoteNames); savePrefs(); }}
             />
           </div>
 
@@ -296,7 +304,7 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
             <span className="setting-label">Metronome</span>
             <button
               className={`toggle-switch${metronomeEnabled ? ' on' : ''}`}
-              onClick={() => setMetronomeEnabled(!metronomeEnabled)}
+              onClick={() => { setMetronomeEnabled(!metronomeEnabled); savePrefs(); }}
             />
           </div>
 
@@ -304,9 +312,29 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
             <span className="setting-label">Note Sound</span>
             <button
               className={`toggle-switch${noteSoundEnabled ? ' on' : ''}`}
-              onClick={() => setNoteSoundEnabled(!noteSoundEnabled)}
+              onClick={() => { setNoteSoundEnabled(!noteSoundEnabled); savePrefs(); }}
             />
           </div>
+
+          {mode === 'sheet' && (
+            <div className="setting-row" style={{ marginTop: 8 }}>
+              <span className="setting-label">Skip Count-in</span>
+              <button
+                className={`toggle-switch${skipCountInOnRestart ? ' on' : ''}`}
+                onClick={() => { setSkipCountInOnRestart(!skipCountInOnRestart); savePrefs(); }}
+              />
+            </div>
+          )}
+
+          {mode === 'sheet' && (
+            <div className="setting-row" style={{ marginTop: 8 }}>
+              <span className="setting-label">Loop Range</span>
+              <button
+                className={`toggle-switch${autoLoopRange ? ' on' : ''}`}
+                onClick={() => { setAutoLoopRange(!autoLoopRange); savePrefs(); }}
+              />
+            </div>
+          )}
 
           {(mode === 'measure' || mode === 'sheet') && metronomeEnabled && (
             <div className="slider-row" style={{ marginTop: 12 }}>
@@ -315,7 +343,7 @@ export default function Sidebar({ onModeChange, isPlaying, onStopSession }) {
                 <span className="setting-value">{Math.round(metroVolume * 100)}%</span>
               </div>
               <input type="range" min={0} max={100} value={Math.round(metroVolume * 100)}
-                onChange={e => setMetroVolume(e.target.value / 100)} />
+                onChange={e => { setMetroVolume(e.target.value / 100); savePrefs(); }} />
             </div>
           )}
 

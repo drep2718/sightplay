@@ -2,14 +2,14 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import StaffDisplay from '../StaffDisplay.jsx';
 import BeatIndicator from '../BeatIndicator.jsx';
 import PieceLibrary from '../PieceLibrary.jsx';
-import { parseMusicXML, parseMidiFile } from '../../utils/musicXmlParser.js';
+import { parseMusicXML, parseMidiFile, parseMxlFile } from '../../utils/musicXmlParser.js';
 import { midiToDisplayName } from '../../utils/noteUtils.js';
 import { useStore } from '../../store/index.js';
 import { useMetronome } from '../../hooks/useMetronome.js';
 import { useAudioSynth } from '../../hooks/useAudioSynth.js';
 import { api } from '../../hooks/useApi.js';
 
-const SUPPORTED_GUIDED = '.xml,.musicxml,.mid,.midi';
+const SUPPORTED_GUIDED = '.xml,.musicxml,.mxl,.mid,.midi';
 const SUPPORTED_PDF    = '.pdf';
 
 /** Timing window to classify a played note as on-beat (ms) */
@@ -100,19 +100,21 @@ function ScoreOverview({ parsedMusic, startMeasure, endMeasure, onSelectMeasure 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1.0];
 
 function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
-  const { recordAttempt, recordNoteMiss, setBpm, setTimeSig, bpm, metroVolume, metronomeEnabled, noteSoundEnabled, showNoteNames, pieces, loadPieces, setHighlightedMidi } = useStore(s => ({
-    recordAttempt:    s.recordAttempt,
-    recordNoteMiss:   s.recordNoteMiss,
-    setBpm:           s.setBpm,
-    setTimeSig:       s.setTimeSig,
-    bpm:              s.bpm,
-    metroVolume:      s.metroVolume,
-    metronomeEnabled: s.metronomeEnabled,
-    noteSoundEnabled: s.noteSoundEnabled,
-    showNoteNames:    s.showNoteNames,
-    pieces:           s.pieces,
-    loadPieces:       s.loadPieces,
-    setHighlightedMidi: s.setHighlightedMidi,
+  const { recordAttempt, recordNoteMiss, setBpm, setTimeSig, bpm, metroVolume, metronomeEnabled, noteSoundEnabled, showNoteNames, skipCountInOnRestart, autoLoopRange, pieces, loadPieces, setHighlightedMidi } = useStore(s => ({
+    recordAttempt:        s.recordAttempt,
+    recordNoteMiss:       s.recordNoteMiss,
+    setBpm:               s.setBpm,
+    setTimeSig:           s.setTimeSig,
+    bpm:                  s.bpm,
+    metroVolume:          s.metroVolume,
+    metronomeEnabled:     s.metronomeEnabled,
+    noteSoundEnabled:     s.noteSoundEnabled,
+    showNoteNames:        s.showNoteNames,
+    skipCountInOnRestart: s.skipCountInOnRestart,
+    autoLoopRange:        s.autoLoopRange,
+    pieces:               s.pieces,
+    loadPieces:           s.loadPieces,
+    setHighlightedMidi:   s.setHighlightedMidi,
   }));
   const { playNote } = useAudioSynth();
 
@@ -139,21 +141,36 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
   const [notePopup,            setNotePopup]            = useState(null);
   const [practiceStartMeasure, setPracticeStartMeasure] = useState(0);
   const [practiceEndMeasure,   setPracticeEndMeasure]   = useState(0);
+  const [startInputText,       setStartInputText]       = useState('1');
+  const [endInputText,         setEndInputText]         = useState('1');
+  const startInputEditing = useRef(false);
+  const endInputEditing   = useRef(false);
   const [showOverview,         setShowOverview]         = useState(false);
   const [startStep,            setStartStep]            = useState(1);
   const [previewPlaying,       setPreviewPlaying]       = useState(false);
+  const [measurePreviewPlaying, setMeasurePreviewPlaying] = useState(false);
   // raw file for re-saving
   const rawFileRef = useRef({ type: null, content: null, name: null });
 
-  const sessionRef        = useRef({ at: 0, co: 0 });
-  const previewTimersRef  = useRef([]);
-  const fileInputRef      = useRef(null);
-  const feedbackTimeout   = useRef(null);
-  const timingTimeout     = useRef(null);
-  const isAdvancing       = useRef(false);
+  const sessionRef          = useRef({ at: 0, co: 0 });
+  const previewTimersRef    = useRef([]);
+  const fileInputRef        = useRef(null);
+  const feedbackTimeout     = useRef(null);
+  const timingTimeout       = useRef(null);
+  const isAdvancing             = useRef(false);
+  const autoSkipTimeout         = useRef(null);
+  const measurePreviewTimers    = useRef([]);
   const practiceStartRef  = useRef(0);  // performance.now() when playing began
   const S                 = useRef({});
   S.current = { parsedMusic, currentColIdx, isPlaying, phase, handMode, peekActive, noteSoundEnabled };
+
+  // Sync measure input text when values change from arrow buttons
+  useEffect(() => {
+    if (!startInputEditing.current) setStartInputText(String(practiceStartMeasure + 1));
+  }, [practiceStartMeasure]);
+  useEffect(() => {
+    if (!endInputEditing.current) setEndInputText(String(practiceEndMeasure + 1));
+  }, [practiceEndMeasure]);
 
   // Load library on mount
   useEffect(() => { loadPieces(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -271,6 +288,14 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
         const text = await file.text();
         result = parseMusicXML(text);
         rawFileRef.current = { type: 'xml', content: text, name: file.name.replace(/\.[^.]+$/, '') };
+      } else if (ext === 'mxl') {
+        const buffer = await file.arrayBuffer();
+        result = await parseMxlFile(buffer);
+        // Store as base64
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        bytes.forEach(b => { binary += String.fromCharCode(b); });
+        rawFileRef.current = { type: 'mxl', content: btoa(binary), name: file.name.replace(/\.[^.]+$/, '') };
       } else if (ext === 'mid' || ext === 'midi') {
         const buffer = await file.arrayBuffer();
         result = await parseMidiFile(buffer);
@@ -280,7 +305,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
         bytes.forEach(b => { binary += String.fromCharCode(b); });
         rawFileRef.current = { type: 'midi', content: btoa(binary), name: file.name.replace(/\.[^.]+$/, '') };
       } else {
-        setParseError('Unsupported type. Please use .xml, .musicxml, .mid, or .midi');
+        setParseError('Unsupported type. Please use .xml, .musicxml, .mxl, .mid, or .midi');
         setLoading(false);
         return;
       }
@@ -325,6 +350,11 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
       let result;
       if (piece.file_type === 'xml') {
         result = parseMusicXML(piece.file_content);
+      } else if (piece.file_type === 'mxl') {
+        const binary = atob(piece.file_content);
+        const bytes  = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        result = await parseMxlFile(bytes.buffer);
       } else {
         const binary = atob(piece.file_content);
         const bytes  = new Uint8Array(binary.length);
@@ -416,6 +446,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     setHighlightedMidi([]);
   }, [totalCols, setHighlightedMidi]);
 
+  // ── Jump to start of prev / next measure ─────────────────────────────────
   // ── Preview playback ──────────────────────────────────────────────────────
   const stopPreview = useCallback(() => {
     previewTimersRef.current.forEach(t => clearTimeout(t));
@@ -454,9 +485,70 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     previewTimersRef.current = timers;
   }, [parsedMusic, practiceStartCol, practiceEndCol, effectiveBpm, previewPlaying, playNote, stopPreview]);
 
+  // ── Current-measure preview (playable while practicing) ───────────────────
+  const stopMeasurePreview = useCallback(() => {
+    measurePreviewTimers.current.forEach(t => clearTimeout(t));
+    measurePreviewTimers.current = [];
+    setMeasurePreviewPlaying(false);
+  }, []);
+
+  const playCurrentMeasure = useCallback(() => {
+    if (!parsedMusic) return;
+    if (measurePreviewPlaying) { stopMeasurePreview(); return; }
+
+    const mStart = parsedMusic.measureColStarts[currentMeasureIdx];
+    const mEnd   = currentMeasureIdx + 1 < parsedMusic.measures.length
+      ? parsedMusic.measureColStarts[currentMeasureIdx + 1]
+      : totalCols;
+
+    const cols = parsedMusic.columns.slice(mStart, mEnd).filter(c => c.allMidi.length);
+    if (!cols.length) return;
+
+    setMeasurePreviewPlaying(true);
+    const beatMs   = (60 / effectiveBpm) * 1000;
+    const startBeat = cols[0].globalBeatPos;
+    const timers = [];
+
+    cols.forEach((col, i) => {
+      const timeMs     = (col.globalBeatPos - startBeat) * beatMs;
+      const nextBeat   = i + 1 < cols.length ? cols[i + 1].globalBeatPos : col.globalBeatPos + 1;
+      const noteDurSec = Math.min((nextBeat - col.globalBeatPos) * beatMs / 1000 * 0.85, 1.2);
+      timers.push(setTimeout(() => {
+        col.allMidi.forEach(m => playNote(m, 0.5, Math.max(noteDurSec, 0.12)));
+      }, timeMs));
+    });
+
+    const totalMs = (cols.at(-1).globalBeatPos - startBeat + 1) * beatMs;
+    timers.push(setTimeout(() => {
+      setMeasurePreviewPlaying(false);
+      measurePreviewTimers.current = [];
+    }, totalMs + 150));
+
+    measurePreviewTimers.current = timers;
+  }, [parsedMusic, currentMeasureIdx, totalCols, effectiveBpm, measurePreviewPlaying, playNote, stopMeasurePreview]);
+
+  // ── Jump to start of prev / next measure ─────────────────────────────────
+  const jumpMeasure = useCallback((delta) => {
+    if (!parsedMusic) return;
+    clearTimeout(feedbackTimeout.current);
+    clearTimeout(autoSkipTimeout.current);
+    isAdvancing.current = false;
+    setFeedback(null);
+    setTimingInfo(null);
+    setPeekActive(false);
+    setHighlightedMidi([]);
+    stopMeasurePreview();
+
+    const starts        = parsedMusic.measureColStarts;
+    const target        = Math.max(0, Math.min(parsedMusic.measures.length - 1, currentMeasureIdx + delta));
+    const clampedTarget = Math.max(practiceStartMeasure, Math.min(practiceEndMeasure, target));
+    setCurrentColIdx(starts[clampedTarget]);
+  }, [parsedMusic, currentMeasureIdx, practiceStartMeasure, practiceEndMeasure, setHighlightedMidi, stopMeasurePreview]);
+
   // ── Start practice with count-in ──────────────────────────────────────────
-  const startPractice = useCallback(() => {
+  const startPractice = useCallback(({ isRestart = false } = {}) => {
     stopPreview();
+    stopMeasurePreview();
     isAdvancing.current = false;
     setCurrentColIdx(practiceStartCol);
     setFeedback(null);
@@ -465,20 +557,26 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     setHintsUsed(0);
     setHighlightedMidi([]);
     setNotePopup(null);
-    setPhase('countIn');
     const fresh = { at: 0, co: 0 };
     sessionRef.current = fresh;
     setSession(fresh);
     setHistory([]);
 
-    metro.start({
-      countIn: beatsPerMeasure,
-      onCountInDone: () => {
-        practiceStartRef.current = performance.now();
-        setPhase('playing');
-      },
-    });
-  }, [metro, beatsPerMeasure, practiceStartCol]);
+    if (isRestart && skipCountInOnRestart) {
+      practiceStartRef.current = performance.now();
+      setPhase('playing');
+      metro.start({});
+    } else {
+      setPhase('countIn');
+      metro.start({
+        countIn: beatsPerMeasure,
+        onCountInDone: () => {
+          practiceStartRef.current = performance.now();
+          setPhase('playing');
+        },
+      });
+    }
+  }, [metro, beatsPerMeasure, practiceStartCol, skipCountInOnRestart]);
 
   // ── Note-on handler — Active Set pattern ─────────────────────────────────
   const handleNoteOn = useCallback((midi) => {
@@ -594,8 +692,8 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     return () => registerModeHandler(null);
   }, [handleNoteOn, registerModeHandler]);
 
-  // Stop preview on unmount
-  useEffect(() => () => stopPreview(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Stop previews on unmount
+  useEffect(() => () => { stopPreview(); stopMeasurePreview(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!isPlaying) {
@@ -617,9 +715,37 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
   useEffect(() => {
     if (currentColIdx >= practiceEndCol && practiceEndCol > 0 && phase === 'playing') {
       metro.stop();
-      setPhase('done');
+      if (autoLoopRange) {
+        startPractice({ isRestart: true });
+      } else {
+        setPhase('done');
+      }
     }
   }, [currentColIdx, practiceEndCol, phase]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-skip columns with no notes for the active hand ───────────────────
+  useEffect(() => {
+    if (phase !== 'playing' || handMode === 'both' || !parsedMusic) return;
+    if (currentColIdx >= practiceEndCol) return;
+
+    const col     = parsedMusic.columns[currentColIdx];
+    const starts  = parsedMusic.measureColStarts;
+    let mi = 0;
+    for (let i = starts.length - 1; i >= 0; i--) {
+      if (starts[i] <= currentColIdx) { mi = i; break; }
+    }
+    const measure  = parsedMusic.measures[mi];
+    const required = handMode === 'rh'
+      ? (col.trebleIdx != null && measure ? (measure.treble[col.trebleIdx]?.midi ?? []) : [])
+      : (col.bassIdx   != null && measure ? (measure.bass[col.bassIdx]?.midi   ?? []) : []);
+
+    if (required.length === 0) {
+      clearTimeout(autoSkipTimeout.current);
+      autoSkipTimeout.current = setTimeout(() => {
+        setCurrentColIdx(prev => prev + 1);
+      }, 20);
+    }
+  }, [currentColIdx, phase, handMode, parsedMusic, practiceEndCol]);
 
   // ── Derived UI ─────────────────────────────────────────────────────────────
   const practiceRange = practiceEndCol - practiceStartCol;
@@ -694,7 +820,7 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
                   The app will read the full piece — every beat, both hands — and guide you through it with a metronome.
                 </div>
                 <div className="upload-formats">
-                  {['MusicXML (.xml)', 'MIDI (.mid)'].map(f => <span key={f} className="format-tag">{f}</span>)}
+                  {['MusicXML (.xml)', 'Compressed MusicXML (.mxl)', 'MIDI (.mid)'].map(f => <span key={f} className="format-tag">{f}</span>)}
                 </div>
               </>
             )}
@@ -802,15 +928,54 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
               <span className="setting-label">Practice</span>
               <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>M</span>
               <button className="range-btn" onClick={() => setPracticeStartMeasure(m => Math.max(0, m - 1))} title="Earlier start">‹</button>
-              <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 13, color: 'var(--accent-gold)', minWidth: 20, textAlign: 'center' }}>
-                {practiceStartMeasure + 1}
-              </span>
+              {(() => {
+                const startV = parseInt(startInputText, 10);
+                const startInvalid = isNaN(startV) || startV < 1 || startV > practiceEndMeasure + 1;
+                return (
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={startInputText}
+                    onFocus={() => { startInputEditing.current = true; }}
+                    onBlur={() => {
+                      startInputEditing.current = false;
+                      if (!isNaN(startV) && startV >= 1 && startV <= practiceEndMeasure + 1) {
+                        setPracticeStartMeasure(startV - 1);
+                      }
+                      setStartInputText(String(practiceStartMeasure + 1));
+                    }}
+                    onChange={e => setStartInputText(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                    style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 13, color: 'var(--accent-gold)', width: 36, textAlign: 'center', background: 'transparent', border: `1px solid ${startInvalid && startInputText !== '' ? 'var(--error, #e05)' : 'var(--border)'}`, borderRadius: 4, padding: '1px 2px' }}
+                  />
+                );
+              })()}
               <button className="range-btn" onClick={() => setPracticeStartMeasure(m => Math.min(practiceEndMeasure, m + 1))} title="Later start">›</button>
               <span style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 4px' }}>to M</span>
               <button className="range-btn" onClick={() => setPracticeEndMeasure(m => Math.max(practiceStartMeasure, m - 1))} title="Earlier end">‹</button>
-              <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 13, color: 'var(--accent-gold)', minWidth: 20, textAlign: 'center' }}>
-                {practiceEndMeasure + 1}
-              </span>
+              {(() => {
+                const endV = parseInt(endInputText, 10);
+                const maxM = parsedMusic?.measures.length ?? 1;
+                const endInvalid = isNaN(endV) || endV < practiceStartMeasure + 1 || endV > maxM;
+                return (
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={endInputText}
+                    onFocus={() => { endInputEditing.current = true; }}
+                    onBlur={() => {
+                      endInputEditing.current = false;
+                      if (!isNaN(endV) && endV >= practiceStartMeasure + 1 && endV <= maxM) {
+                        setPracticeEndMeasure(endV - 1);
+                      }
+                      setEndInputText(String(practiceEndMeasure + 1));
+                    }}
+                    onChange={e => setEndInputText(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                    style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 13, color: 'var(--accent-gold)', width: 36, textAlign: 'center', background: 'transparent', border: `1px solid ${endInvalid && endInputText !== '' ? 'var(--error, #e05)' : 'var(--border)'}`, borderRadius: 4, padding: '1px 2px' }}
+                  />
+                );
+              })()}
               <button className="range-btn" onClick={() => setPracticeEndMeasure(m => Math.min((parsedMusic?.measures.length ?? 1) - 1, m + 1))} title="Later end">›</button>
               <button
                 className="reset-btn"
@@ -955,12 +1120,14 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
             )}
 
             <div style={{ display: 'flex', gap: 8, marginTop: 8, flexShrink: 0 }}>
+              <button className="range-btn" onClick={() => jumpMeasure(-1)} title="Previous measure" style={{ fontSize: 16, padding: '2px 8px' }}>‹</button>
+              <button className="range-btn" onClick={() => jumpMeasure(1)}  title="Next measure"     style={{ fontSize: 16, padding: '2px 8px' }}>›</button>
               <button className="skip-btn" onClick={skipToNext}>Skip →</button>
               <button className="stop-btn" onClick={() => onStop({ total_attempts: sessionRef.current.at, total_correct: sessionRef.current.co })}>
                 Stop
               </button>
-              <button className="reset-btn" onClick={startPractice}>Restart</button>
-              <button className="reset-btn" onClick={() => { metro.stop(); isAdvancing.current = false; clearTimeout(feedbackTimeout.current); clearTimeout(timingTimeout.current); setCurrentColIdx(0); setFeedback(null); setPhase('idle'); setParsedMusic(null); }}>
+              <button className="reset-btn" onClick={() => startPractice({ isRestart: true })}>Restart</button>
+              <button className="reset-btn" onClick={() => { metro.stop(); isAdvancing.current = false; clearTimeout(feedbackTimeout.current); clearTimeout(timingTimeout.current); setCurrentColIdx(0); setFeedback(null); setPhase('idle'); setParsedMusic(null); onStop({ total_attempts: sessionRef.current.at, total_correct: sessionRef.current.co }); }}>
                 New File
               </button>
               <button
@@ -969,6 +1136,13 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
                 title={peekActive ? 'Cancel peek' : `Show next note on keyboard (${hintsUsed} used)`}
               >
                 {peekActive ? '★ Peek' : '☆ Peek'}
+              </button>
+              <button
+                className={`peek-btn${measurePreviewPlaying ? ' active' : ''}`}
+                onClick={playCurrentMeasure}
+                title={measurePreviewPlaying ? 'Stop preview' : 'Hear current measure'}
+              >
+                {measurePreviewPlaying ? '◼ Listen' : '♬ Listen'}
               </button>
             </div>
           </div>

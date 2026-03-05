@@ -186,6 +186,94 @@ export function parseMusicXML(xmlString) {
 }
 
 /**
+ * Decompress a single ZIP entry using the browser's DecompressionStream API.
+ * @param {ArrayBuffer} buffer - full ZIP file buffer
+ * @param {{ method: number, compressedSize: number, dataOffset: number }} entry
+ * @returns {Promise<Uint8Array>}
+ */
+async function decompressZipEntry(buffer, entry) {
+  const compressedData = new Uint8Array(buffer, entry.dataOffset, entry.compressedSize);
+  if (entry.method === 0) return compressedData; // stored
+  if (entry.method !== 8) throw new Error(`Unsupported ZIP compression method: ${entry.method}`);
+
+  const ds = new DecompressionStream('deflate-raw');
+  const writer = ds.writable.getWriter();
+  const reader = ds.readable.getReader();
+  writer.write(compressedData);
+  writer.close();
+
+  const chunks = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const totalLen = chunks.reduce((sum, c) => sum + c.length, 0);
+  const result = new Uint8Array(totalLen);
+  let pos = 0;
+  chunks.forEach(c => { result.set(c, pos); pos += c.length; });
+  return result;
+}
+
+/**
+ * Parse a compressed MusicXML (.mxl) file. Uses the browser's built-in
+ * DecompressionStream to unzip — no external dependencies required.
+ * @param {ArrayBuffer} buffer
+ * @returns {Promise<ParsedMusic | null>}
+ */
+export async function parseMxlFile(buffer) {
+  try {
+    const view = new DataView(buffer);
+    const decoder = new TextDecoder();
+
+    // Walk local file headers (PK\x03\x04 = 0x04034b50)
+    const entries = [];
+    let offset = 0;
+    while (offset + 30 <= buffer.byteLength) {
+      if (view.getUint32(offset, true) !== 0x04034b50) break;
+      const method         = view.getUint16(offset + 8,  true);
+      const compressedSize = view.getUint32(offset + 18, true);
+      const filenameLen    = view.getUint16(offset + 26, true);
+      const extraLen       = view.getUint16(offset + 28, true);
+      const filename       = decoder.decode(new Uint8Array(buffer, offset + 30, filenameLen));
+      const dataOffset     = offset + 30 + filenameLen + extraLen;
+      entries.push({ filename, method, compressedSize, dataOffset });
+      offset = dataOffset + compressedSize;
+    }
+
+    if (!entries.length) return null;
+
+    // Find which XML file to parse: prefer container.xml rootfile, else first .xml
+    let targetFilename = null;
+    const containerEntry = entries.find(e => e.filename === 'META-INF/container.xml');
+    if (containerEntry) {
+      const data = await decompressZipEntry(buffer, containerEntry);
+      const xml  = decoder.decode(data);
+      const m    = xml.match(/full-path="([^"]+)"/);
+      if (m) targetFilename = m[1];
+    }
+    if (!targetFilename) {
+      const xmlEntry = entries.find(e =>
+        (e.filename.endsWith('.xml') || e.filename.endsWith('.musicxml')) &&
+        e.filename !== 'mimetype'
+      );
+      if (xmlEntry) targetFilename = xmlEntry.filename;
+    }
+    if (!targetFilename) return null;
+
+    const target = entries.find(e => e.filename === targetFilename);
+    if (!target) return null;
+
+    const xmlData   = await decompressZipEntry(buffer, target);
+    const xmlString = decoder.decode(xmlData);
+    return parseMusicXML(xmlString);
+  } catch (err) {
+    console.error('MXL parse error:', err);
+    return null;
+  }
+}
+
+/**
  * Parse a MIDI file. First track = treble, second track = bass (if present).
  * @param {ArrayBuffer} buffer
  * @returns {Promise<ParsedMusic | null>}

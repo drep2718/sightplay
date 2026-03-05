@@ -453,7 +453,7 @@ body::before {
   margin-top: 2px;
 }
 
-.piece-fav-btn, .piece-del-btn {
+.piece-fav-btn, .piece-del-btn, .piece-rename-btn {
   background: transparent;
   border: none;
   cursor: pointer;
@@ -465,6 +465,18 @@ body::before {
 }
 .piece-fav-btn:hover, .piece-fav-btn.active { color: var(--accent-gold); }
 .piece-del-btn:hover { color: var(--incorrect-red); }
+.piece-rename-btn:hover { color: var(--text-primary); }
+
+.piece-rename-input {
+  width: 100%;
+  background: var(--bg-secondary, #1a1a24);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 2px 4px;
+  outline: none;
+}
 
 .piece-card-loading {
   position: absolute;

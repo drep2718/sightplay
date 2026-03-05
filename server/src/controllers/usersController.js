@@ -6,7 +6,7 @@ const authService = require('../services/authService');
 async function getPreferences(req, res, next) {
   try {
     const prefs = await userService.getPreferences(req.user.id);
-    if (!prefs) return res.status(404).json({ error: 'Preferences not found' });
+    if (!prefs) return res.status(500).json({ error: 'Could not load preferences' });
     res.json({ preferences: prefs });
   } catch (err) {
     next(err);

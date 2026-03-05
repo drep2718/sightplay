@@ -13,9 +13,16 @@ async function getUserById(userId) {
 }
 
 async function getPreferences(userId) {
+  // Ensure row exists (accounts created before this migration may not have one)
+  await query(
+    `INSERT INTO user_preferences (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+    [userId]
+  );
   const { rows } = await query(
     `SELECT mode, clef, tier, accidentals, show_keyboard, kb_size,
-            bpm, time_sig, interval_max
+            bpm, time_sig, interval_max,
+            show_note_names, metro_volume, metronome_enabled, note_sound_enabled,
+            skip_count_in_on_restart, auto_loop_range
      FROM user_preferences WHERE user_id = $1`,
     [userId]
   );
@@ -26,22 +33,47 @@ async function updatePreferences(userId, prefs) {
   const {
     mode, clef, tier, accidentals, show_keyboard,
     kb_size, bpm, time_sig, interval_max,
+    show_note_names, metro_volume, metronome_enabled, note_sound_enabled,
+    skip_count_in_on_restart, auto_loop_range,
   } = prefs;
 
+  // Ensure row exists before updating
+  await query(
+    `INSERT INTO user_preferences (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+    [userId]
+  );
+
+  // Core columns — always exist (migration 001)
   await query(
     `UPDATE user_preferences
-     SET mode = COALESCE($2, mode),
-         clef = COALESCE($3, clef),
-         tier = COALESCE($4, tier),
-         accidentals = COALESCE($5, accidentals),
-         show_keyboard = COALESCE($6, show_keyboard),
-         kb_size = COALESCE($7, kb_size),
-         bpm = COALESCE($8, bpm),
-         time_sig = COALESCE($9, time_sig),
-         interval_max = COALESCE($10, interval_max)
+     SET mode          = COALESCE($2,  mode),
+         clef          = COALESCE($3,  clef),
+         tier          = COALESCE($4,  tier),
+         accidentals   = COALESCE($5,  accidentals),
+         show_keyboard = COALESCE($6,  show_keyboard),
+         kb_size       = COALESCE($7,  kb_size),
+         bpm           = COALESCE($8,  bpm),
+         time_sig      = COALESCE($9,  time_sig),
+         interval_max  = COALESCE($10, interval_max)
      WHERE user_id = $1`,
     [userId, mode, clef, tier, accidentals, show_keyboard, kb_size, bpm, time_sig, interval_max]
   );
+
+  // Extended columns — added by migrations 003–005; skip gracefully if not yet migrated
+  try {
+    await query(
+      `UPDATE user_preferences
+       SET show_note_names          = COALESCE($2,  show_note_names),
+           metro_volume             = COALESCE($3,  metro_volume),
+           metronome_enabled        = COALESCE($4,  metronome_enabled),
+           note_sound_enabled       = COALESCE($5,  note_sound_enabled),
+           skip_count_in_on_restart = COALESCE($6,  skip_count_in_on_restart),
+           auto_loop_range          = COALESCE($7,  auto_loop_range)
+       WHERE user_id = $1`,
+      [userId, show_note_names, metro_volume, metronome_enabled, note_sound_enabled,
+       skip_count_in_on_restart, auto_loop_range]
+    );
+  } catch { /* columns not yet migrated — core prefs already saved above */ }
 }
 
 async function deleteAccount(userId) {
