@@ -5,6 +5,8 @@ import { api } from '../hooks/useApi.js';
 import { TIERS } from '../utils/generators.js';
 import { countWhiteKeys } from '../utils/noteUtils.js';
 
+const IS_DEMO = import.meta.env.VITE_DEMO_MODE === 'true';
+
 const MODES = [
   { id: 'flash',    icon: '♩', label: 'Flash Note' },
   { id: 'interval', icon: '♬', label: 'Interval Training' },
@@ -31,6 +33,16 @@ function useDebouncedPrefsSave() {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       const s = storeRef.current;
+      if (IS_DEMO) {
+        localStorage.setItem('ms-prefs', JSON.stringify({
+          mode: s.mode, clef: s.clef, tier: s.tier, accidentals: s.accidentals,
+          showKeyboard: s.showKeyboard, kbSize: s.kbSize, bpm: s.bpm, timeSig: s.timeSig,
+          intervalMax: s.intervalMax, showNoteNames: s.showNoteNames, metroVolume: s.metroVolume,
+          metronomeEnabled: s.metronomeEnabled, noteSoundEnabled: s.noteSoundEnabled,
+          skipCountInOnRestart: s.skipCountInOnRestart, autoLoopRange: s.autoLoopRange,
+        }));
+        return;
+      }
       api.put('/users/preferences', {
         mode:               s.mode,
         clef:               s.clef,

@@ -1,6 +1,16 @@
 import React, { useState } from 'react';
 import { api } from '../hooks/useApi.js';
 
+const IS_DEMO = import.meta.env.VITE_DEMO_MODE === 'true';
+const LS_PIECES = 'ms-pieces';
+
+function lsGetPieces() {
+  try { return JSON.parse(localStorage.getItem(LS_PIECES)) ?? []; } catch { return []; }
+}
+function lsSavePieces(pieces) {
+  localStorage.setItem(LS_PIECES, JSON.stringify(pieces));
+}
+
 /**
  * Collapsible panel showing saved pieces. Shown above the upload dropzone in SheetMusicMode.
  * Props:
@@ -23,9 +33,16 @@ export default function PieceLibrary({ pieces, onLoad, onRefresh }) {
   async function handleLoad(piece) {
     setLoading(piece.id);
     try {
-      const { data } = await api.get(`/pieces/${piece.id}`);
-      await api.patch(`/pieces/${piece.id}/played`);
-      onLoad(data.piece);
+      if (IS_DEMO) {
+        const pieces = lsGetPieces();
+        const idx = pieces.findIndex(p => p.id === piece.id);
+        if (idx >= 0) { pieces[idx].play_count = (pieces[idx].play_count ?? 0) + 1; lsSavePieces(pieces); }
+        onLoad(piece);
+      } else {
+        const { data } = await api.get(`/pieces/${piece.id}`);
+        await api.patch(`/pieces/${piece.id}/played`);
+        onLoad(data.piece);
+      }
     } catch {
       showToast('Failed to load piece', false);
     } finally {
@@ -36,7 +53,14 @@ export default function PieceLibrary({ pieces, onLoad, onRefresh }) {
   async function handleFavorite(e, piece) {
     e.stopPropagation();
     try {
-      await api.patch(`/pieces/${piece.id}/favorite`);
+      if (IS_DEMO) {
+        const pieces = lsGetPieces();
+        const p = pieces.find(p => p.id === piece.id);
+        if (p) p.is_favorite = !p.is_favorite;
+        lsSavePieces(pieces);
+      } else {
+        await api.patch(`/pieces/${piece.id}/favorite`);
+      }
       onRefresh();
     } catch { /* ignore */ }
   }
@@ -51,8 +75,16 @@ export default function PieceLibrary({ pieces, onLoad, onRefresh }) {
     const trimmed = renameVal.trim();
     if (!trimmed || trimmed === piece.title) { setRenaming(null); return; }
     try {
-      await api.patch(`/pieces/${piece.id}/rename`, { title: trimmed });
-      showToast('Renamed');
+      if (IS_DEMO) {
+        const pieces = lsGetPieces();
+        const p = pieces.find(p => p.id === piece.id);
+        if (p) p.title = trimmed;
+        lsSavePieces(pieces);
+        showToast('Renamed');
+      } else {
+        await api.patch(`/pieces/${piece.id}/rename`, { title: trimmed });
+        showToast('Renamed');
+      }
       onRefresh();
     } catch {
       showToast('Failed to rename', false);
@@ -65,8 +97,13 @@ export default function PieceLibrary({ pieces, onLoad, onRefresh }) {
     e.stopPropagation();
     if (!window.confirm(`Delete "${piece.title}"?`)) return;
     try {
-      await api.delete(`/pieces/${piece.id}`);
-      showToast('Piece deleted');
+      if (IS_DEMO) {
+        lsSavePieces(lsGetPieces().filter(p => p.id !== piece.id));
+        showToast('Piece deleted');
+      } else {
+        await api.delete(`/pieces/${piece.id}`);
+        showToast('Piece deleted');
+      }
       onRefresh();
     } catch {
       showToast('Failed to delete', false);

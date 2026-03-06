@@ -9,6 +9,9 @@ import { useMetronome } from '../../hooks/useMetronome.js';
 import { useAudioSynth } from '../../hooks/useAudioSynth.js';
 import { api } from '../../hooks/useApi.js';
 
+const IS_DEMO    = import.meta.env.VITE_DEMO_MODE === 'true';
+const LS_PIECES  = 'ms-pieces';
+
 const SUPPORTED_GUIDED = '.xml,.musicxml,.mxl,.mid,.midi';
 const SUPPORTED_PDF    = '.pdf';
 
@@ -386,18 +389,43 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     setSaveToast(null);
     try {
       const title = parsedMusic.title !== 'Unknown' ? parsedMusic.title : raw.name || 'Untitled';
-      const res = await api.post('/pieces', {
-        title,
-        file_type:      raw.type,
-        file_content:   raw.content,
-        tempo:          parsedMusic.tempo,
-        time_sig:       parsedMusic.timeSignature,
-        total_cols:     parsedMusic.columns.length,
-        has_both_staves: parsedMusic.hasBothStaves,
-      });
-      setAlreadySavedId(res.data.piece?.id ?? true);
-      setSaveToast({ msg: 'Saved to library!', ok: true });
-      loadPieces();
+
+      if (IS_DEMO) {
+        const pieces = (() => { try { return JSON.parse(localStorage.getItem(LS_PIECES)) ?? []; } catch { return []; } })();
+        const idx = pieces.findIndex(p => p.title === title);
+        const newPiece = {
+          id:              idx >= 0 ? pieces[idx].id : `local-${Date.now()}`,
+          title,
+          file_type:       raw.type,
+          file_content:    raw.content,
+          tempo:           parsedMusic.tempo,
+          time_sig:        parsedMusic.timeSignature,
+          total_cols:      parsedMusic.columns?.length ?? 0,
+          has_both_staves: parsedMusic.hasBothStaves,
+          is_favorite:     idx >= 0 ? pieces[idx].is_favorite : false,
+          play_count:      idx >= 0 ? pieces[idx].play_count  : 0,
+          created_at:      idx >= 0 ? pieces[idx].created_at  : new Date().toISOString(),
+        };
+        if (idx >= 0) pieces[idx] = newPiece; else pieces.unshift(newPiece);
+        if (pieces.length > 50) pieces.pop();
+        localStorage.setItem(LS_PIECES, JSON.stringify(pieces));
+        setAlreadySavedId(newPiece.id);
+        setSaveToast({ msg: 'Saved to library!', ok: true });
+        loadPieces();
+      } else {
+        const res = await api.post('/pieces', {
+          title,
+          file_type:      raw.type,
+          file_content:   raw.content,
+          tempo:          parsedMusic.tempo,
+          time_sig:       parsedMusic.timeSignature,
+          total_cols:     parsedMusic.columns.length,
+          has_both_staves: parsedMusic.hasBothStaves,
+        });
+        setAlreadySavedId(res.data.piece?.id ?? true);
+        setSaveToast({ msg: 'Saved to library!', ok: true });
+        loadPieces();
+      }
     } catch (err) {
       const status = err?.response?.status;
       const msg = status === 413 ? 'File too large'

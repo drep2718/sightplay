@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import { api } from '../hooks/useApi.js';
 
+const IS_DEMO = import.meta.env.VITE_DEMO_MODE === 'true';
+const LS_PREFS  = 'ms-prefs';
+const LS_STATS  = 'ms-stats';
+const LS_PIECES = 'ms-pieces';
+
 export const useStore = create((set, get) => ({
   // ── MIDI ──────────────────────────────────────────
   midiAccess: null,
@@ -84,6 +89,13 @@ export const useStore = create((set, get) => ({
   pieces: [],
 
   loadPieces: async () => {
+    if (IS_DEMO) {
+      try {
+        const raw = localStorage.getItem(LS_PIECES);
+        set({ pieces: raw ? JSON.parse(raw) : [] });
+      } catch { /* non-critical */ }
+      return;
+    }
     try {
       const { data } = await api.get('/pieces');
       set({ pieces: data.pieces ?? [] });
@@ -108,6 +120,18 @@ export const useStore = create((set, get) => ({
    * Also handles the one-time localStorage migration.
    */
   loadUserData: async (user) => {
+    if (IS_DEMO) {
+      try {
+        const raw = localStorage.getItem(LS_PREFS);
+        if (raw) set(JSON.parse(raw));
+      } catch { /* use defaults */ }
+      try {
+        const raw = localStorage.getItem(LS_STATS);
+        if (raw) set({ stats: JSON.parse(raw) });
+      } catch { /* use defaults */ }
+      return;
+    }
+
     try {
       // Load preferences
       const { data: prefData } = await api.get('/users/preferences');
@@ -209,7 +233,11 @@ export const useStore = create((set, get) => ({
     };
     set({ stats: updated });
 
-    // Fire-and-forget API sync
-    api.patch('/stats/attempt', { correct, reactionTimeMs }).catch(() => {});
+    // Persist or sync
+    if (IS_DEMO) {
+      localStorage.setItem(LS_STATS, JSON.stringify(updated));
+    } else {
+      api.patch('/stats/attempt', { correct, reactionTimeMs }).catch(() => {});
+    }
   },
 }));

@@ -16,6 +16,8 @@ import { useMidi } from './hooks/useMidi.js';
 import { useStore } from './store/index.js';
 import { api } from './hooks/useApi.js';
 
+const IS_DEMO = import.meta.env.VITE_DEMO_MODE === 'true';
+
 // Computer keyboard → MIDI note fallback (C4=60 .. C5=72)
 const KEY_MAP = {
   a: 60, w: 61, s: 62, e: 63, d: 64,
@@ -88,19 +90,20 @@ function MainApp() {
     resetSession();
     setIsPlaying(true);
 
-    // Create a session record in the DB
-    try {
-      const { data } = await api.post('/sessions', {
-        mode, clef, tier, accidentals, bpm, time_sig: timeSig, interval_max: intervalMax,
-      });
-      setSessionId(data.session.id);
-    } catch { /* non-critical */ }
+    if (!IS_DEMO) {
+      try {
+        const { data } = await api.post('/sessions', {
+          mode, clef, tier, accidentals, bpm, time_sig: timeSig, interval_max: intervalMax,
+        });
+        setSessionId(data.session.id);
+      } catch { /* non-critical */ }
+    }
   }, [resetSession, mode, clef, tier, accidentals, bpm, timeSig, intervalMax]);
 
   const stopSession = useCallback(async (finalStats) => {
     setIsPlaying(false);
 
-    if (sessionId) {
+    if (!IS_DEMO && sessionId) {
       try {
         await api.post(`/sessions/${sessionId}/end`, finalStats || {});
       } catch { /* non-critical */ }

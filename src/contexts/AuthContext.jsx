@@ -77,7 +77,7 @@ export function AuthProvider({ children }) {
 
   // On mount: attempt silent refresh using the HttpOnly refresh cookie
   useEffect(() => {
-    if (IS_DEMO) { setLoading(false); return; }
+    if (IS_DEMO) { demoLogin(); setLoading(false); return; }
     silentRefresh().finally(() => setLoading(false));
     return () => clearTimer();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
