@@ -458,7 +458,23 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     if (!s.parsedMusic || s.phase !== 'playing') return;
     const col = s.parsedMusic.columns[s.currentColIdx];
     if (!col) return;
-    setHighlightedMidi(col.allMidi);
+    // Compute midi based on active hand (same logic as handleNoteOn)
+    let midi = col.allMidi;
+    if (s.handMode !== 'both' && s.parsedMusic.measureColStarts) {
+      const starts = s.parsedMusic.measureColStarts;
+      let mi = 0;
+      for (let i = starts.length - 1; i >= 0; i--) {
+        if (starts[i] <= s.currentColIdx) { mi = i; break; }
+      }
+      const measure = s.parsedMusic.measures[mi];
+      if (s.handMode === 'rh') {
+        midi = col.trebleIdx != null && measure ? (measure.treble[col.trebleIdx]?.midi ?? []) : [];
+      } else {
+        midi = col.bassIdx != null && measure ? (measure.bass[col.bassIdx]?.midi ?? []) : [];
+      }
+      if (!midi.length) midi = col.allMidi; // fallback if hand has no note here
+    }
+    setHighlightedMidi(midi);
     setPeekActive(true);
     setHintsUsed(h => h + 1);
   }, [peekActive, setHighlightedMidi]);
@@ -660,6 +676,10 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
       feedbackTimeout.current = setTimeout(() => {
         isAdvancing.current = false;
         setCurrentColIdx(prev => prev + 1);
+        if (S.current.peekActive) {
+          setPeekActive(false);
+          setHighlightedMidi([]);
+        }
       }, 30);
       return;
     }
@@ -771,9 +791,12 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
       clearTimeout(autoSkipTimeout.current);
       autoSkipTimeout.current = setTimeout(() => {
         setCurrentColIdx(prev => prev + 1);
+        // Clear stale peek — it pointed at a column that was skipped
+        setPeekActive(false);
+        setHighlightedMidi([]);
       }, 20);
     }
-  }, [currentColIdx, phase, handMode, parsedMusic, practiceEndCol]);
+  }, [currentColIdx, phase, handMode, parsedMusic, practiceEndCol]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived UI ─────────────────────────────────────────────────────────────
   const practiceRange = practiceEndCol - practiceStartCol;
