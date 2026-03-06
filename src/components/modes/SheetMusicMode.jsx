@@ -458,23 +458,8 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     if (!s.parsedMusic || s.phase !== 'playing') return;
     const col = s.parsedMusic.columns[s.currentColIdx];
     if (!col) return;
-    // Compute midi based on active hand (same logic as handleNoteOn)
-    let midi = col.allMidi;
-    if (s.handMode !== 'both' && s.parsedMusic.measureColStarts) {
-      const starts = s.parsedMusic.measureColStarts;
-      let mi = 0;
-      for (let i = starts.length - 1; i >= 0; i--) {
-        if (starts[i] <= s.currentColIdx) { mi = i; break; }
-      }
-      const measure = s.parsedMusic.measures[mi];
-      if (s.handMode === 'rh') {
-        midi = col.trebleIdx != null && measure ? (measure.treble[col.trebleIdx]?.midi ?? []) : [];
-      } else {
-        midi = col.bassIdx != null && measure ? (measure.bass[col.bassIdx]?.midi ?? []) : [];
-      }
-      if (!midi.length) midi = col.allMidi; // fallback if hand has no note here
-    }
-    setHighlightedMidi(midi);
+    // Always highlight all notes expected at this column (both hands)
+    setHighlightedMidi(col.allMidi);
     setPeekActive(true);
     setHintsUsed(h => h + 1);
   }, [peekActive, setHighlightedMidi]);
@@ -833,8 +818,8 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
     const lhNames = hasBass
       ? measure.bass[currentCol.bassIdx]?.midi.map(midiToDisplayName).join(', ')
       : null;
-    if (rhNames && lhNames) return { rh: rhNames, lh: lhNames };
-    return null;
+    if (!rhNames && !lhNames) return null;
+    return { rh: rhNames, lh: lhNames };
   }, [currentCol, parsedMusic, currentMeasureIdx]);
 
   // ── Upload screen ──────────────────────────────────────────────────────────
@@ -1104,11 +1089,11 @@ function GuidedPractice({ isPlaying, onStart, onStop, registerModeHandler }) {
             {/* ── Current step info ────────────────────────────────────── */}
             {phase === 'playing' && currentColIdx < totalCols && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                {/* RH + LH labels — only shown when peek is active */}
+                {/* Note labels — shown when peek is active */}
                 {peekActive && handNames && (
                   <div className="hand-names-row">
-                    <span className="hand-label rh">RH: {handNames.rh}</span>
-                    <span className="hand-label lh">LH: {handNames.lh}</span>
+                    {handNames.rh && <span className="hand-label rh">RH: {handNames.rh}</span>}
+                    {handNames.lh && <span className="hand-label lh">LH: {handNames.lh}</span>}
                   </div>
                 )}
                 {/* Timing feedback — always shown */}
